@@ -1,5 +1,5 @@
 // Pure helpers shared by the app and the Node tests. No DOM access here.
-export const APP_VERSION = '0.4.1';
+export const APP_VERSION = '0.4.2';
 export const TZ = 'America/Los_Angeles';
 export const BRANDS = ['Higgsfield', 'Whop', 'CapCut', 'Composio', 'Makon', 'Strawberry', 'Amboras', 'Teamily', 'FOMO', 'Cheetah', 'Polsia', 'Replit'];
 export const PARTS = ['HOOK', 'INSERT', 'DEMO', 'CTA'];
@@ -21,7 +21,7 @@ export const QUALITIES = {
   '4k': { w: 3840, h: 2160, fps: 30, bits: 50e6, label: '4K · 30fps (sharpest, default)' },
   '4k-60': { w: 3840, h: 2160, fps: 60, bits: 70e6, label: '4K · 60fps' }
 };
-export const CHUNK_BYTES = 4 * 1024 * 1024; // must match a multiple of 256 KB (server accepts any such size)
+export const CHUNK_BYTES = 8 * 1024 * 1024; // must match a multiple of 256 KB (server accepts any such size)
 
 function ptParts(date) {
   const f = new Intl.DateTimeFormat('en-US', {

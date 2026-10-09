@@ -48,7 +48,9 @@ export const blobStore = {
     try {
       await tx('blobs', 'readwrite', (s) => s.put(blob, id));
     } catch (e) {
-      // Older Safari builds refused Blobs in IndexedDB; store raw bytes instead.
+      // Older Safari builds refused Blobs in IndexedDB; store raw bytes instead. Never for big clips:
+      // reading 100s of MB into memory would crash the page (the pieces stay saved and are retried).
+      if (blob.size > 200 * 1024 * 1024) throw e;
       const buf = await blob.arrayBuffer();
       await tx('blobs', 'readwrite', (s) => s.put({ __buf: buf, type: blob.type }, id));
     }
@@ -58,7 +60,8 @@ export const blobStore = {
     if (v && v.__buf) return new Blob([v.__buf], { type: v.type });
     return v || null;
   },
-  del: (id) => tx('blobs', 'readwrite', (s) => s.delete(id))
+  del: (id) => tx('blobs', 'readwrite', (s) => s.delete(id)),
+  keys: () => tx('blobs', 'readonly', (s) => s.getAllKeys())
 };
 
 export const kv = {

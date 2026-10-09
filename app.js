@@ -541,8 +541,9 @@ function addVideo() {
 /* ------------------------------------------------------------------ */
 const KEEP_FOR_PLAYBACK = 12; // uploaded clips kept on the phone this session so ▶ still works; cleared on next launch
 const keptIds = [];
+const KEEP_MAX_BYTES = 150 * 1024 * 1024; // big 4K clips are not kept after upload (phone storage)
 function keepForPlayback(c) {
-  if (c.part === 'REF') return false;
+  if (c.part === 'REF' || (c.size || 0) > KEEP_MAX_BYTES) return false;
   keptIds.push(c.id);
   while (keptIds.length > KEEP_FOR_PLAYBACK) {
     const old = keptIds.shift();
@@ -1554,7 +1555,7 @@ async function onRecorderStop(r) {
   const seg = take && take.segs.find((s) => s.id === r.id);
   try {
     if (!blob.size) throw Object.assign(new Error('empty'), { empty: true });
-    await blobStore.put(r.id, blob);
+    try { await blobStore.put(r.id, blob); } catch (e1) { await new Promise((ok) => setTimeout(ok, 1200)); await blobStore.put(r.id, blob); }
     if (seg) Object.assign(seg, { saving: false, mime: type, size: blob.size });
     else await blobStore.del(r.id); // the take was thrown away meanwhile
     await saveTake(); // record the part in the take BEFORE dropping its crash-safe pieces
@@ -1649,7 +1650,8 @@ async function finishTake() {
     for (const s of t.segs) blobs.push(await blobStore.get(s.id).catch(() => null));
     const keep = t.segs.filter((s, i) => blobs[i] && blobs[i].size);
     const kb = blobs.filter((b) => b && b.size);
-    if (!keep.length) { toast('The recorded parts are missing from this phone. Start a new take.', 4000); take = null; await saveTake(); return; }
+    // 0.4.2: never drop the take or ask for a refilm. Parts that can't be read yet stay saved (in pieces) and come back.
+    if (!keep.length) { toast('Your parts are still being saved on this phone. Wait a few seconds and tap ✓ again. Nothing was deleted.', 5000); return; }
     t.segs = keep;
     const s0 = keep[0];
     const type = String(s0.mime || kb[0].type || 'video/mp4').split(';')[0];
@@ -2093,6 +2095,44 @@ async function saveSettings() {
   await testConn();
 }
 
+/**
+ * 0.4.2 rescue (runs at every launch, deletes nothing):
+ * - uploads that older versions parked for good ("missing", size mismatch, stalled) go back in the queue;
+ * - video saved on the phone that no clip or take points to any more (e.g. after the old "Start a new take"
+ *   message) comes back as a draft clip in Uploads, so it can be tagged and sent instead of refilmed.
+ */
+async function rescueStuck() {
+  let requeued = 0, found = 0;
+  const all = await clipsStore.all();
+  for (const c of all) {
+    if (c.status !== 'error' || Number.isFinite(c.retryAt)) continue;
+    if (/Wrong upload key|Not connected/i.test(c.error || '')) continue;
+    if (/Drive copy is/.test(c.error || '')) { c.uploadId = null; c.session = undefined; c.offset = 0; }
+    Object.assign(c, { status: 'queued', retryAt: 0, tries: 0, error: '' });
+    await clipsStore.put(c);
+    requeued++;
+  }
+  const known = new Set(all.map((c) => c.id));
+  if (take) take.segs.forEach((s) => known.add(s.id));
+  for (const k of await blobStore.keys()) {
+    if (known.has(k)) continue;
+    const b = await blobStore.get(k).catch(() => null);
+    if (!b || !b.size || !/^video\//.test(b.type || 'video/mp4')) continue;
+    const c = {
+      id: k, createdAt: Date.now() + found, recordedAt: Date.now(), durationSec: null, mime: String(b.type || 'video/mp4').split(';')[0], size: b.size,
+      camera: '', source: 'camera', brand: allBrands()[0], video: null, day: ptDayKey(), demo: null, part: 'HOOK',
+      note: 'Recovered part (saved on the phone, not uploaded yet)', status: 'draft'
+    };
+    await clipsStore.put(c);
+    found++;
+  }
+  if (requeued || found) {
+    allClips = await clipsStore.all();
+    toast(found ? `Found ${found} saved part${found > 1 ? 's' : ''} that never uploaded. They're in Uploads (tap the status at the top): tag each one and it uploads. Nothing to refilm.`
+      : `Resuming ${requeued} upload${requeued > 1 ? 's' : ''} that had stopped.`, 7000);
+  }
+}
+
 async function pruneOld() {
   const cutoff = Date.now() - 3 * 864e5;
   for (const c of await clipsStore.all()) {
@@ -2335,6 +2375,8 @@ function bind() {
   window.addEventListener('pageshow', (e) => { if (e.persisted && nav.view === 'camera' && !recording && !camReady()) startCamera(); });
   window.addEventListener('focus', () => { if (nav.brand && nav.view !== 'home' && nav.view !== 'camera') syncDay(nav.brand, nav.day); });
   window.addEventListener('online', () => uploader.run());
+  // Ask iOS not to evict saved clips under storage pressure (home-screen apps are usually granted this).
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   window.addEventListener('hashchange', () => { consumeSetupHash(); refreshQueueUI(); });
   setInterval(() => { if (!document.hidden) uploader.run(); }, 30000);
   // pick up links dumped from the other device while a folder is open
@@ -2360,6 +2402,7 @@ async function init() {
   if (prefs.gs !== 'off') setGs(prefs.gs, false);
   try { await recoverTakes(); } catch (e) { /* ignore */ }
   try { await pruneOld(); } catch (e) { /* ignore */ }
+  try { await rescueStuck(); } catch (e) { /* ignore */ }
   await refreshQueueUI();
   uploader.run();
   if (!cfg.url) setTimeout(() => toast('Tap "Set up" (top right) to connect Drive.', 3500), 1200);
