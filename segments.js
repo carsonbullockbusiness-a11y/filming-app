@@ -6,6 +6,14 @@
 
 export const DELETE_CONFIRM_MS = 3000;
 
+/** Keep MediaRecorder running this long after a pause/finish tap so the end of a word isn't cut off. */
+export const POST_ROLL_MS = 300;
+
+/** True once `now` is at least `ms` after the pause tap (when the recorder may actually stop). */
+export function postRollReady(pauseTapAt, now, ms = POST_ROLL_MS) {
+  return (Number(now) - Number(pauseTapAt)) >= ms;
+}
+
 export function newTake(o) {
   return {
     id: o.id, brand: o.brand, video: o.video || null, day: o.day || null, part: o.part || 'HOOK',

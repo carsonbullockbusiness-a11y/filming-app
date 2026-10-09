@@ -4,6 +4,8 @@
 // renumbering the fragments and shifting their timestamps (tfdt) so they play back to back.
 // No re-encoding, no quality loss, and the big mdat payloads are never copied into memory:
 // the result is a Blob made of slices of the original Blobs plus a few patched header boxes.
+// Segment ends are never trimmed: every moof+mdat fragment of every segment is appended in full
+// (the phone's POST_ROLL_MS post-roll is what keeps the last word; the join must not cut it).
 // If the segments can't be joined safely (not fragmented, WebM, different camera/resolution/codec
 // settings), joinFmp4 throws and the app uploads the segments separately for the editor to join.
 

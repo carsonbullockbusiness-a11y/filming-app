@@ -5,7 +5,7 @@ import {
   exposureSupport, clampEv, evFromDrag, evToDarkAlpha, fmtEv, orderParts, isDayKey, ptTimeToken
 } from './shared.js';
 import {
-  newTake, takeTotal, addSegment, removeLastSegment, deleteTap, DELETE_CONFIRM_MS, barScale, barLayout, fmtTake,
+  newTake, takeTotal, addSegment, removeLastSegment, deleteTap, DELETE_CONFIRM_MS, POST_ROLL_MS, barScale, barLayout, fmtTake,
   segmentClipPlan, mergeSegNote, userPartOfNote, pruneMissing
 } from './segments.js';
 import { joinFmp4, fmp4Duration } from './mp4join.js';
@@ -869,6 +869,8 @@ function bindStageGestures() {
 /* Recording: TikTok-style takes made of segments                      */
 /* Record, pause (switch apps, lock the screen), record more, delete   */
 /* the last segment, then ✓ joins them into one clip.                  */
+/* Pause keeps MediaRecorder running POST_ROLL_MS (~300 ms) after the  */
+/* tap so mid-word endings aren't cut; UI still shows paused instantly.*/
 /* Each segment is its own MediaRecorder run; its pieces go to         */
 /* IndexedDB every 2 s (crash-safe) and the finished segment is kept   */
 /* in blobStore until the take is finished or the segment is deleted.  */
@@ -1017,15 +1019,28 @@ function tickRec() {
   if (prefs.maxLen && total >= prefs.maxLen) { finishAfterStop = true; pauseSegment(); }
 }
 
-/** Ends the current segment (record button, app switch, screen lock, auto-stop). The take stays open. */
-function pauseSegment() {
-  if (!recording || !rec) return;
+/**
+ * Ends the current segment (record button, ✓ finish, app switch, screen lock, auto-stop).
+ * UI goes to paused immediately, but MediaRecorder keeps running POST_ROLL_MS longer so the
+ * end of a word isn't chopped when Carson taps pause mid-word. The take stays open.
+ * Pass { immediate: true } on pagehide so we flush before the page dies.
+ */
+function pauseSegment(opts = {}) {
+  if (!rec) return;
+  if (rec.postRolling) {
+    if (opts.immediate && rec.stopNow) { clearTimeout(rec.postRollTimer); rec.stopNow(); }
+    return;
+  }
+  if (!recording && rec.recorder.state !== 'recording') return;
   const r = rec;
-  recording = false;
-  rec = null;
+  r.postRolling = true;
+  r.pauseTapAt = performance.now();
+  recording = false; // UI shows paused right away; recorder still running
   clearInterval(recTimer);
-  const dur = Math.round((performance.now() - recStartedAt) / 100) / 10;
   liveSec = 0;
+  // duration includes the post-roll we're about to keep (refined when we actually stop)
+  const keepMs = opts.immediate ? 0 : POST_ROLL_MS;
+  const dur = Math.round(((r.pauseTapAt - recStartedAt) / 1000 + keepMs / 1000) * 10) / 10;
   r.meta.durationSec = dur;
   const m = r.meta;
   // placeholder right away so the bar and the order are correct; filled in once the bytes are saved
@@ -1034,10 +1049,26 @@ function pauseSegment() {
     height: m.height || null, fps: m.fps || null, promptY: m.promptY, saving: true
   });
   segSaving = new Promise((res) => { r.done = res; });
-  try { r.recorder.stop(); } catch (e) { onRecorderStop(r); }
   document.body.classList.remove('recording');
   stopPrompter();
   renderTakeUI();
+  let stopped = false;
+  r.stopNow = () => {
+    if (stopped) return;
+    stopped = true;
+    clearTimeout(r.postRollTimer);
+    const actual = Math.round((performance.now() - recStartedAt) / 100) / 10;
+    r.meta.durationSec = actual;
+    const seg = take && take.segs.find((s) => s.id === r.id);
+    if (seg) seg.durationSec = actual;
+    rec = null;
+    try {
+      if (r.recorder && r.recorder.state === 'recording') r.recorder.stop();
+      else onRecorderStop(r);
+    } catch (e) { onRecorderStop(r); }
+  };
+  if (keepMs <= 0) r.stopNow();
+  else r.postRollTimer = setTimeout(r.stopNow, keepMs);
 }
 
 async function onRecorderStop(r) {
@@ -1788,7 +1819,9 @@ function bind() {
     if (nav.day < ptDayKey() && nav.view === 'home') { nav.day = ptDayKey(); renderBrowser(); }
     uploader.run();
   });
-  window.addEventListener('pagehide', () => { if (recording) pauseSegment(); });
+  window.addEventListener('pagehide', () => {
+    if (recording || (rec && rec.postRolling)) pauseSegment({ immediate: true });
+  });
   window.addEventListener('pageshow', (e) => { if (e.persisted && nav.view === 'camera' && !recording && !camReady()) startCamera(); });
   window.addEventListener('focus', () => { if (nav.brand && nav.view !== 'home' && nav.view !== 'camera') syncDay(nav.brand, nav.day); });
   window.addEventListener('online', () => uploader.run());

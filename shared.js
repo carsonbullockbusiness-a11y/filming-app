@@ -1,5 +1,5 @@
 // Pure helpers shared by the app and the Node tests. No DOM access here.
-export const APP_VERSION = '0.3.0';
+export const APP_VERSION = '0.3.1';
 export const TZ = 'America/Los_Angeles';
 export const BRANDS = ['Higgsfield', 'Whop', 'CapCut', 'Composio', 'Makon', 'Strawberry', 'Amboras', 'Teamily', 'FOMO', 'Cheetah', 'Polsia', 'Replit'];
 export const PARTS = ['HOOK', 'INSERT', 'DEMO', 'CTA'];
