@@ -41,18 +41,22 @@
     <span id="resBadge" class="badge2"></span>
   </div>
   <div id="segBar" hidden></div>
+  <div id="segPlays" hidden><button id="segPlay" class="pill small">▶ Last part</button><button id="takePlay" class="pill small" hidden>▶ Whole take</button></div>
   <div id="recTime" hidden>0:00</div>
 
   <nav id="rail">
     <button id="flipBtn" class="tool"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 13a3 3 0 0 1 5.2-2M15 13a3 3 0 0 1-5.2 2M14 9.5v1.7h-1.7M10 16.5v-1.7h1.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Flip</span></button>
-    <button id="lensBtn" class="tool" hidden><b id="lensLabel">1x</b><span>Lens</span></button>
     <button id="evBtn" class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/></svg><span id="evLabel">Exposure</span></button>
+    <button id="scriptBtn" class="tool"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 10h6M9 13.5h6M9 17h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Script</span></button>
+    <button id="timerBtn" class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 9v4l2.5 2M9.5 3h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span id="timerLabel">Timer</span></button>
+    <button id="lensBtn" class="tool" hidden><b id="lensLabel">1x</b><span>Lens</span></button>
+    <button id="moreBtn" class="tool" aria-label="More tools"><b>⋯</b><span>More</span></button>
+    <div id="railMore" hidden>
     <button id="ringBtn" class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/></svg><span>Ring</span></button>
     <button id="gsBtn" class="tool"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="10.5" r="2.6" fill="currentColor"/><path d="M7 19c.8-3 2.8-4.5 5-4.5s4.2 1.5 5 4.5" fill="currentColor"/></svg><span>Green screen</span></button>
-    <button id="timerBtn" class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 9v4l2.5 2M9.5 3h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span id="timerLabel">Timer</span></button>
-    <button id="scriptBtn" class="tool"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 10h6M9 13.5h6M9 17h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Script</span></button>
     <button id="gridBtn" class="tool"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17" stroke="currentColor" stroke-width="1.2"/></svg><span id="gridLabel">Grid</span></button>
     <button id="settingsBtn" class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.8 1.8M16.7 16.7l1.8 1.8M5.5 18.5l1.8-1.8M16.7 7.3l1.8-1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span>Settings</span></button>
+    </div>
   </nav>
 
   <footer id="bottom">
@@ -68,7 +72,7 @@
     <div class="row"><b>Exposure · <span id="evPart">Demo</span></b><span id="evNow" class="hint"></span></div>
     <p id="evSupport" class="hint"></p>
     <label class="range"><span class="split"><span>Darker</span><span>Brighter</span></span><input type="range" id="evRange" min="-2" max="2" step="0.1"></label>
-    <div id="darkRow" class="row" hidden><span><b>Darken (fallback)</b><br><small class="hint">Darkens the picture in the app. Records at 1080p max while on.</small></span><label class="switch"><input type="checkbox" id="darkOn"><span></span></label></div>
+    <div id="darkRow" class="row" hidden><span><b>Darken (fallback)</b><br><small class="hint">Off by default. For bright screens only (max 1080p while on).</small></span><label class="switch"><input type="checkbox" id="darkOn"><span></span></label></div>
     <div class="row gap"><button id="evReset" class="ghost small">Reset to 0</button><button id="evDemo" class="ghost small">Demo preset −0.7</button></div>
     <p class="hint">Tip: drag up or down on the camera to change it. Each part (Hook, Insert, Demo, CTA) remembers its own setting.</p>
   </section>
@@ -117,13 +121,13 @@
 
       <div id="vHome" class="b-view">
         <div class="daybar"><button id="dayPrev" class="ghost small" aria-label="Previous day">‹</button><b id="dayLabel"></b><button id="dayNext" class="ghost small" aria-label="Next day">›</button></div>
-        <button id="openFeed" class="card feedcard"><span class="card-main"><b>▶ Review finals</b><small id="feedHint">Swipe through new edits: approve or ask for changes</small></span><span class="chev">›</span></button>
+        <button id="openFeed" class="card feedcard slim"><span class="card-main"><b>▶ Review finals</b><small id="feedHint">All brands · approve or ask for changes</small></span><span class="chev">›</span></button>
         <div id="brandList" class="list"></div>
-        <div class="row gap"><input id="newBrand" type="text" placeholder="Add a brand" autocomplete="off"><button id="addBrand" class="ghost small">Add</button></div>
+        <details class="addrow"><summary>+ Add brand</summary><div class="row gap"><input id="newBrand" type="text" placeholder="Brand name" autocomplete="off"><button id="addBrand" class="ghost small">Add</button></div></details>
       </div>
 
       <div id="vBrand" class="b-view" hidden>
-        <div id="brandTabs" class="seg tabs"><button data-tab="videos">Videos</button><button data-tab="demos">Demos</button></div>
+        <div id="brandTabs" class="seg tabs"><button data-tab="videos">Videos</button><button data-tab="demos">Demos</button><button data-tab="review">Review</button></div>
         <div id="tabVideos" class="b-view">
           <div id="planBox" class="planbox" hidden></div>
           <div id="videoList" class="list"></div>
@@ -133,44 +137,43 @@
         <div id="tabDemos" class="b-view" hidden>
           <p id="demoHead" class="hint"></p>
           <div id="wfList" class="list"></div>
-          <div class="row gap"><input id="newWf" type="text" placeholder="Add a workflow folder" autocomplete="off"><button id="addWf" class="ghost small">Add</button></div>
+          <details class="addrow"><summary>+ Add workflow</summary><div class="row gap"><input id="newWf" type="text" placeholder="Workflow name" autocomplete="off"><button id="addWf" class="ghost small">Add</button></div></details>
           <p id="demoSync" class="hint"></p>
         </div>
       </div>
 
       <div id="vWf" class="b-view" hidden>
         <div id="wfInfo" class="readybox"></div>
-        <div class="row2">
+        <div id="wfLinks" class="row gap wrap"></div>
+        <div id="wfCoach"></div>
+        <h4>This session</h4>
+        <div id="wfClips"></div>
+        <p class="hint">Each ✓ saves one demo straight into this folder; the camera stays open for the next.</p>
+        <div class="dock">
           <button id="wfFilm" class="primary">● Film demos</button>
           <label class="btn"><input type="file" id="wfImport" accept="video/*" multiple hidden>Camera roll</label>
         </div>
-        <div id="wfLinks" class="row gap wrap"></div>
-        <div id="wfCoach"></div>
-        <h4>On this phone</h4>
-        <div id="wfClips"></div>
-        <p class="hint">Each ✓ saves one demo and uploads it straight into this workflow folder. The camera stays open for the next one. Demos aren't edited until a video uses them.</p>
       </div>
 
       <div id="vVideo" class="b-view" hidden>
         <div id="vReadyBox" class="readybox" hidden></div>
-        <div class="row2">
-          <button id="filmBtn" class="primary">● Film</button>
-          <label class="btn"><input type="file" id="vImport" accept="video/*" multiple hidden>Camera roll</label>
-        </div>
         <h4>Clips</h4>
         <div id="vClips"></div>
+        <h4>References <small class="hint">tap one to attach</small></h4>
         <div id="vCoach"></div>
-        <h4>Today's references <small class="hint">tap to attach</small></h4>
         <div id="vPicks" class="picks"></div>
-        <h4>Reference links</h4>
-        <div class="row gap"><input id="vRefUrl" type="text" inputmode="url" placeholder="Paste TikTok / IG / Notion links (several at once is fine)" autocomplete="off"><button id="vRefAdd" class="ghost small">Add</button></div>
+        <div class="row gap"><input id="vRefUrl" type="text" inputmode="url" placeholder="Paste links (TikTok, IG, Notion)" autocomplete="off"><button id="vRefAdd" class="ghost small">Add</button></div>
         <ul id="vRefList" class="reflist"></ul>
-        <label class="btn wide"><input type="file" id="vRefFiles" accept="image/*,video/*" multiple hidden>Add reference screenshots / videos</label>
+        <label class="btn wide"><input type="file" id="vRefFiles" accept="image/*,video/*" multiple hidden>+ Screenshots / videos</label>
         <h4>Notes for the editor</h4>
         <textarea id="vNotes" rows="4" placeholder="e.g. Use hook take 2, keep the pause at 0:04, no zoom on the demo"></textarea>
         <p id="vSync" class="hint"></p>
         <button id="vDone" class="primary done">Done · send to editor</button>
         <button id="vReopen" class="linkish" hidden>Reopen (still filming)</button>
+        <div class="dock">
+          <button id="filmBtn" class="primary">● Film</button>
+          <label class="btn"><input type="file" id="vImport" accept="video/*" multiple hidden>Camera roll</label>
+        </div>
       </div>
     </div>
   </section>
@@ -179,6 +182,13 @@
   <section id="feed" hidden>
     <header class="feed-head"><button id="feedBack" class="pill">‹ Done</button><b id="feedCount"></b><button id="feedReload" class="pill small">↻</button></header>
     <div id="feedList"></div>
+  </section>
+
+  <!-- 0.4.1: full-screen playback (last part, whole take, any clip still on this phone) -->
+  <section id="player" hidden>
+    <video id="playerVid" playsinline webkit-playsinline controls></video>
+    <p id="plInfo"></p>
+    <div class="pl-acts"><button id="plDelete" class="chg" hidden>Delete part</button><button id="plWhole" class="chg" hidden>▶ Whole take</button><button id="plClose" class="ok">Keep</button></div>
   </section>
 
   <div id="backdrop" hidden></div>
@@ -220,7 +230,7 @@
     <button id="cfgSave" class="primary">Save &amp; test connection</button>
     <h4>Camera</h4>
     <label class="field">Video quality
-      <select id="quality"><option value="720">720p · 30fps (smallest files)</option><option value="1080">1080p · 30fps</option><option value="1080-60">1080p · 60fps</option><option value="4k">4K · 30fps</option><option value="4k-60">4K · 60fps</option></select>
+      <select id="quality"><option value="720">720p · 30fps (smallest files)</option><option value="1080">1080p · 30fps</option><option value="1080-60">1080p · 60fps</option><option value="4k">4K · 30fps (sharpest, default)</option><option value="4k-60">4K · 60fps</option></select>
     </label>
     <label class="field">Auto-stop after
       <select id="maxLen"><option value="0">No limit</option><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">60 seconds</option><option value="180">3 minutes</option></select>

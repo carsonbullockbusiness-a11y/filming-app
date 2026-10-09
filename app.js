@@ -1,5 +1,5 @@
 import {
-  BRANDS, PARTS, PART_LABELS, APP_VERSION, DEFAULT_EV, ptDayKey, ptClock, clipName, pickMimeType,
+  BRANDS, PARTS, PART_LABELS, APP_VERSION, DEFAULT_EV, AUDIO_CONSTRAINTS, ptDayKey, ptClock, clipName, pickMimeType,
   decodeSetup, fmtDur, fmtBytes, ringColor, uid, dailyTarget, dayKeyToFolderName, shiftDayKey, dayKeyLabel,
   videoNumbers, mergeVideo, pendingForVideo, extractUrls, refLabel, qualityOf, videoConstraints, resLabel,
   exposureSupport, clampEv, evFromDrag, evToDarkAlpha, fmtEv, orderParts, isDayKey, ptTimeToken,
@@ -29,7 +29,7 @@ const DEFAULTS = {
   ring: { on: false, bright: 100, warm: 50, size: 12 },
   gs: 'off', countdown: 0, grid: 0,
   script: { on: false, text: '', speed: 35, size: 28 },
-  quality: '1080', maxLen: 0, brands: [],
+  quality: '4k', maxLen: 0, brands: [],
   ev: Object.assign({}, DEFAULT_EV), darken: false, chunked: true
 };
 const stored = LS.get('prefs', {});
@@ -39,6 +39,14 @@ const prefs = Object.assign({}, DEFAULTS, stored, {
   ev: Object.assign({}, DEFAULT_EV, stored.ev)
 });
 if (!PARTS.includes(prefs.part)) prefs.part = 'HOOK';
+// 0.4.1 "no filter" reset (once): every effect off, sharpest capture. Carson can turn effects back on by hand.
+if (!prefs.raw041) {
+  prefs.raw041 = true;
+  prefs.gs = 'off';
+  prefs.darken = false;
+  if (['720', '1080'].includes(prefs.quality)) prefs.quality = '4k';
+  LS.set('prefs', prefs);
+}
 const savePrefs = () => LS.set('prefs', prefs);
 let cfg = LS.get('cfg', { url: '', key: '' });
 const allBrands = () => {
@@ -65,6 +73,7 @@ const uploader = createUploader({
   clips: clipsStore,
   blobs: blobStore,
   getConfig: () => cfg,
+  keepBlob: (c) => keepForPlayback(c),
   onChange: () => {
     if (refreshTimer) return;
     refreshTimer = setTimeout(() => { refreshTimer = null; refreshQueueUI(); }, 300);
@@ -379,7 +388,7 @@ function renderBrowser() {
 
 function renderHome() {
   $('bTitle').textContent = 'Grok Film';
-  $('bSub').textContent = cfg.url ? 'Pick a brand, then a video folder.' : 'Not connected to Drive yet. Tap Set up (top right).';
+  $('bSub').textContent = cfg.url ? '' : 'Not connected to Drive yet. Tap Set up (top right).';
   const w = dayWord(nav.day);
   $('dayLabel').textContent = (w ? w + ' · ' : '') + dayKeyLabel(nav.day);
   $('brandList').innerHTML = allBrands().map((b) => {
@@ -401,7 +410,7 @@ function renderBrand() {
   const st = dayState(brand, day);
   $('bTitle').textContent = brand;
   const t = dailyTarget(brand);
-  $('bSub').textContent = `${dayWord(day) ? dayWord(day) + ' · ' : ''}${dayKeyLabel(day)} · target ${t}/day`;
+  $('bSub').textContent = `${dayWord(day) || dayKeyLabel(day)} · ${t}/day`;
   document.querySelectorAll('#brandTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === nav.tab));
   $('tabVideos').hidden = nav.tab !== 'videos';
   $('tabDemos').hidden = nav.tab !== 'demos';
@@ -435,6 +444,7 @@ function clipRow(c, withPlace = false) {
   else if (c.status === 'error') action = `<button data-act="retry" data-id="${c.id}">Retry</button>`;
   else if (c.status === 'done' && c.link) action = `<a href="${esc(c.link)}" target="_blank" rel="noopener">Open</a>`;
   const del = c.status !== 'done' && c.status !== 'uploading' ? `<button data-act="del" data-id="${c.id}" aria-label="Delete">✕</button>` : '';
+  if (c.part !== 'REF' && (c.status !== 'done' || c.blobKept)) action = `<button data-act="play" data-id="${c.id}" aria-label="Play">▶</button>` + action;
   const place = withPlace ? `${c.brand}${c.demo ? ' · Demo Bank / ' + c.demo : c.video ? ' · Video ' + c.video : ''} · ` : '';
   return `<div class="clip"><span class="tag ${esc(c.part)}">${esc(PART_LABELS[c.part] || c.part)}</span>
     <div class="meta"><b>${esc(name)}</b><small class="${c.status === 'error' ? 'err' : ''}">${esc(place + statusText(c))}${c.note ? ' · “' + esc(c.note) + '”' : ''}</small>
@@ -442,8 +452,10 @@ function clipRow(c, withPlace = false) {
 }
 
 function driveRow(file, part, extra, id) {
+  const kept = id && allClips.find((c) => c.fileId === id && c.blobKept);
   return `<div class="clip"><span class="tag ${esc(part)}">${esc(PART_LABELS[part] || part)}</span>
     <div class="meta"><b>${esc(file)}</b><small>${esc(extra)}</small></div>
+    ${kept ? `<button data-act="play" data-id="${kept.id}" aria-label="Play">▶</button>` : ''}
     ${id ? `<a href="https://drive.google.com/file/d/${esc(id)}/view" target="_blank" rel="noopener">Open</a>` : ''}</div>`;
 }
 
@@ -452,8 +464,8 @@ function renderVideo() {
   const st = dayState(brand, day);
   const v = vget(st, k);
   $('bTitle').textContent = `Video ${k}`;
-  $('bSub').innerHTML = `<b>${esc(brand)}</b> · ${esc((dayWord(day) ? dayWord(day) + ' · ' : '') + dayKeyLabel(day))} · ` +
-    (v.folderUrl ? `<a href="${esc(v.folderUrl)}" target="_blank" rel="noopener">Open in Drive</a>` : esc(`Drive: ${brand} / ${dayKeyToFolderName(day)} / Video ${k}`));
+  $('bSub').innerHTML = `<b>${esc(brand)}</b> · ${esc(dayWord(day) || dayKeyLabel(day))}` +
+    (v.folderUrl ? ` · <a href="${esc(v.folderUrl)}" target="_blank" rel="noopener">Drive ↗</a>` : '');
 
   // ready / sending banner
   const box = $('vReadyBox');
@@ -522,6 +534,79 @@ function addVideo() {
   putDay(brand, day, st);
   schedulePush(brand, day, n, 10);
   go('video', { video: n });
+}
+
+/* ------------------------------------------------------------------ */
+/* 0.4.1: playback (last part / whole take / clips on this phone)      */
+/* ------------------------------------------------------------------ */
+const KEEP_FOR_PLAYBACK = 12; // uploaded clips kept on the phone this session so ▶ still works; cleared on next launch
+const keptIds = [];
+function keepForPlayback(c) {
+  if (c.part === 'REF') return false;
+  keptIds.push(c.id);
+  while (keptIds.length > KEEP_FOR_PLAYBACK) {
+    const old = keptIds.shift();
+    blobStore.del(old).catch(() => {});
+    clipsStore.get(old).then((x) => { if (x) { x.blobKept = false; return clipsStore.put(x); } }).catch(() => {});
+  }
+  return true;
+}
+const player = { urls: [], i: 0 };
+/** Called synchronously inside the tap so iOS lets the later play() run with sound. */
+function primePlayer() {
+  const v = $('playerVid');
+  v.muted = false;
+  $('player').hidden = false;
+  try { const p = v.play(); if (p) p.catch(() => {}); } catch (e) { /* not ready yet */ }
+}
+function openPlayer(blobs, { info = '', seg = false } = {}) {
+  const v = $('playerVid');
+  player.urls.forEach((u) => URL.revokeObjectURL(u));
+  player.urls = blobs.map((b) => URL.createObjectURL(b));
+  player.i = 0;
+  $('plInfo').textContent = info;
+  $('plDelete').hidden = !seg;
+  $('plWhole').hidden = !(seg && take && take.segs.length > 1);
+  $('plClose').textContent = seg ? 'Keep' : 'Close';
+  $('player').hidden = false;
+  v.loop = player.urls.length === 1;
+  v.onended = () => { if (player.urls.length > 1 && player.i < player.urls.length - 1) { v.src = player.urls[++player.i]; v.play().catch(() => {}); } };
+  v.src = player.urls[0];
+  v.muted = false;
+  v.play().catch(() => { /* iOS blocked autoplay: the native ▶ is right there */ });
+}
+function closePlayer() {
+  const v = $('playerVid');
+  v.pause();
+  v.removeAttribute('src');
+  v.load();
+  player.urls.forEach((u) => URL.revokeObjectURL(u));
+  player.urls = [];
+  $('player').hidden = true;
+}
+async function playLastPart() {
+  if (recording || finishing || !takeHere() || !take.segs.length) return;
+  primePlayer();
+  await segSaving;
+  const s = take.segs[take.segs.length - 1];
+  const b = await blobStore.get(s.id).catch(() => null);
+  if (!b) { closePlayer(); toast('That part is still saving. Try again in a second.'); return; }
+  openPlayer([b], { seg: true, info: `Part ${take.segs.length} of ${take.segs.length} · ${fmtTake(s.durationSec || 0)}` });
+}
+async function playWholeTake() {
+  if (recording || finishing || !takeHere() || !take.segs.length) return;
+  primePlayer();
+  await segSaving;
+  const kb = [];
+  for (const s of take.segs) { const b = await blobStore.get(s.id).catch(() => null); if (b && b.size) kb.push(b); }
+  if (!kb.length) { closePlayer(); return; }
+  const type = String(kb[0].type || 'video/mp4').split(';')[0];
+  let blobs = kb;
+  let how = `${kb.length} parts`;
+  if (kb.length > 1 && /mp4/.test(type)) {
+    try { blobs = [(await joinFmp4(kb, type)).blob]; how = `${kb.length} parts joined`; } catch (e) { how = `${kb.length} parts, played one after another`; }
+  }
+  openPlayer(blobs, { info: `Whole take · ${how} · ${fmtTake(takeTotal(take))}. Close, then ✓ to save it.` });
 }
 
 /* ------------------------------------------------------------------ */
@@ -618,8 +703,8 @@ function renderWf() {
     sd && `<a class="btn" href="${esc(sd)}" target="_blank" rel="noopener">Demo script ↗</a>`,
     n.folderUrl && `<a class="btn" href="${esc(n.folderUrl)}" target="_blank" rel="noopener">Open in Drive</a>`].filter(Boolean).join('');
   $('wfCoach').innerHTML = coachHtml(coachFor(brand, [wf]));
-  const mine = allClips.filter((c) => c.brand === brand && c.demo === wf && c.status !== 'done').sort((a, b) => (a.recordedAt || 0) - (b.recordedAt || 0));
-  $('wfClips').innerHTML = mine.map((c) => clipRow(c)).join('') || '<p class="empty">Nothing waiting. Everything filmed here is in Drive.</p>';
+  const mine = allClips.filter((c) => c.brand === brand && c.demo === wf && (c.status !== 'done' || c.blobKept)).sort((a, b) => (a.recordedAt || 0) - (b.recordedAt || 0));
+  $('wfClips').innerHTML = mine.map((c) => clipRow(c)).join('') || '<p class="empty">Nothing filmed here this session yet.</p>';
   $('wfFilm').hidden = !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
 }
 
@@ -646,9 +731,16 @@ function sessionsFor(b) {
   const srv = planCache && planCache.sessions ? planCache.sessions[b] : null;
   return local || srv || 2;
 }
+/** Receiver's live counts; approved-not-posted = approved finals (7 d) minus own posts (7 d, from posts.db via the plan JSON). */
+function pipeOf(b) {
+  const p = (planCache && planCache.plan && planCache.plan.brands && planCache.plan.brands[b]) || {};
+  const pipe = Object.assign({ raw: 0, edited: 0, approved: 0 }, (planCache && planCache.pipeline && planCache.pipeline[b]) || {});
+  pipe.approved = Math.max(0, (Number(pipe.approved) || 0) - (Number(p.posted7d) || 0));
+  return pipe;
+}
 function planOf(b) {
   const p = (planCache && planCache.plan && planCache.plan.brands && planCache.plan.brands[b]) || {};
-  const pipe = (planCache && planCache.pipeline && planCache.pipeline[b]) || {};
+  const pipe = pipeOf(b);
   const bank = (planCache && planCache.demo && planCache.demo[b]) || { total: 0 };
   return batchPlanFor({ brand: b, daily: p.daily != null ? p.daily : dailyTarget(b), weekly: p.weekly != null ? p.weekly : null,
     sessions: sessionsFor(b), pipeline: pipe, demoShare: p.demoShare != null ? p.demoShare : (bank.workflows ? 1 : 0), bank: bank.total });
@@ -658,7 +750,7 @@ function renderPlan() {
   const b = nav.brand;
   if (!planCache && !cfg.url) { box.hidden = true; return; }
   const bp = planOf(b);
-  const pipe = (planCache && planCache.pipeline && planCache.pipeline[b]) || {};
+  const pipe = pipeOf(b);
   const all = allBrands().map(planOf).filter((x) => x.film > 0);
   const total = all.reduce((n, x) => n + x.film, 0);
   box.hidden = false;
@@ -759,7 +851,7 @@ function feedCard(f, i) {
     <video playsinline webkit-playsinline controls loop preload="auto"></video><div class="load">Loading…</div>
     <div class="finfo"><div><b>${esc(f.brand)} · ${esc(f.name)}</b>${badge}</div><small class="hint">${esc(f.day)} · ${i + 1} of ${feed.items.length}</small>
       ${misses}${c.caption ? `<div class="cap"><b>Caption:</b> ${esc(c.caption)}</div>` : ''}
-      ${c.musts.length ? `<div class="cap"><b>Musts:</b> ${c.musts.map(esc).join(' · ')}</div>` : ''}
+      ${c.musts.length ? `<details class="cap musts"><summary><b>Musts</b> (${c.musts.length})</summary>${c.musts.map((m) => `<div>· ${esc(m)}</div>`).join('')}</details>` : ''}
       ${prior}${coachHtml(f.coachNotes || [])}
       <div class="acts"><button class="ok" data-act="approve">✓ Approve</button><button class="chg" data-act="changes">Needs changes</button></div>
       <div class="chgbox" hidden><textarea placeholder="What should change? (tap the 🎤 on the keyboard to dictate)"></textarea>
@@ -771,14 +863,16 @@ async function openFeed(force = false) {
   $('feed').hidden = false;
   nav.view = 'feed';
   if (!cfg.url) { $('feedList').innerHTML = '<p class="empty" style="padding:80px 20px">Connect Drive in Settings first.</p>'; return; }
-  if (feed.items.length && !force) return;
+  if (feed.items.length && !force && feed.shownFor === (feed.brand || '')) return;
   $('feedList').innerHTML = '<p class="empty" style="padding:80px 20px">Loading finals…</p>';
   loadPlan();
   try {
     const r = await uploader.finals({ days: 3 });
-    feed.items = r.finals || [];
+    const all = r.finals || [];
+    feed.items = feed.brand ? all.filter((f) => f.brand === feed.brand) : all;
+    feed.shownFor = feed.brand || '';
   } catch (e) { $('feedList').innerHTML = `<p class="empty" style="padding:80px 20px">Couldn't load: ${esc(e.message)}</p>`; return; }
-  $('feedCount').textContent = `${feed.items.length} to review`;
+  $('feedCount').textContent = `${feed.brand ? feed.brand + ' · ' : ''}${feed.items.length} to review`;
   $('feedList').innerHTML = feed.items.map(feedCard).join('') || '<p class="empty" style="padding:80px 20px">Nothing new to review. ✓</p>';
   $('feedList').scrollTop = 0;
   if (feed.obs) feed.obs.disconnect();
@@ -850,7 +944,7 @@ function closeFeed() {
   feed.urls.clear();
   feed.items = [];
   $('feed').hidden = true;
-  go('home');
+  if (feed.brand) { feed.brand = null; go('brand', { tab: nav.tab === 'review' ? 'videos' : nav.tab }); } else go('home');
 }
 
 /* Uploads sheet (every clip still on this device) */
@@ -878,8 +972,15 @@ async function onClipAction(e) {
   const btn = e.target.closest('button[data-act]');
   if (!btn) return;
   const id = btn.dataset.id;
+  if (btn.dataset.act === 'play') primePlayer(); // must run inside the tap for sound on iOS
   const c = await clipsStore.get(id);
-  if (!c) return;
+  if (!c) { closePlayer(); return; }
+  if (btn.dataset.act === 'play') {
+    const blob = await blobStore.get(id).catch(() => null);
+    if (!blob) { toast('This clip is only in Drive now. Tap Open to watch it there.'); closePlayer(); return; }
+    openPlayer([blob], { info: c.fileName || (c.demo ? c.demo + ' demo' : PART_LABELS[c.part] || c.part) });
+    return;
+  }
   if (btn.dataset.act === 'retry') { uploader.retry(id); toast('Retrying…'); }
   else if (btn.dataset.act === 'del') {
     if (!confirm('Delete this clip from the phone? It has not been uploaded.')) return;
@@ -905,7 +1006,7 @@ async function refreshQueueUI() {
     text = `↑ ${pending.length} · ${p && p.total ? Math.floor((p.sent / p.total) * 100) : 0}%`;
   } else if (errors.length) { text = `⚠ ${errors.length} not sent`; cls = 'warn'; }
   else if (pending.length) text = `↑ ${pending.length} waiting`;
-  else { text = '✓ Uploaded'; cls = 'ok'; }
+  else { text = '✓'; cls = 'ok'; } // all uploaded: just a small tick, no label
   for (const id of ['queueBtn', 'bQueue']) {
     const q = $(id);
     q.textContent = text;
@@ -978,11 +1079,11 @@ async function startCamera() {
   }
   const v = videoConstraints(prefs.quality, prefs.facing, prefs.facing === 'environment' ? prefs.lensId : '');
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: v, audio: true });
+    stream = await navigator.mediaDevices.getUserMedia({ video: v, audio: AUDIO_CONSTRAINTS });
   } catch (e) {
     if (v.deviceId) { prefs.lensId = ''; savePrefs(); return startCamera(); }
     if (e && e.name === 'OverconstrainedError') {
-      try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: prefs.facing } }, audio: true }); } catch (e2) { e = e2; }
+      try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: prefs.facing } }, audio: AUDIO_CONSTRAINTS }); } catch (e2) { e = e2; }
     }
     if (!stream) {
       camMsg(e && e.name === 'NotAllowedError'
@@ -992,6 +1093,7 @@ async function startCamera() {
     }
   }
   camMsg('');
+  noProcessing(stream);
   video.srcObject = stream;
   video.muted = true;
   await video.play().catch(() => {});
@@ -1001,6 +1103,24 @@ async function startCamera() {
   applyEv(true);
   wake(true);
   setTimeout(() => updateCamInfo(true), 900);
+}
+
+/** Turn off any camera/mic effect the browser lets us switch off (background blur, face framing, mic processing). */
+function noProcessing(s) {
+  for (const t of s.getTracks()) {
+    let c = {};
+    try { c = t.getCapabilities ? t.getCapabilities() : {}; } catch (e) { c = {}; }
+    const adv = {};
+    if (t.kind === 'video') {
+      if (c.backgroundBlur) adv.backgroundBlur = false;
+      if (c.faceFraming) adv.faceFraming = false;
+      if (c.eyeGazeCorrection) adv.eyeGazeCorrection = false;
+      if (c.powerEfficient) adv.powerEfficient = false;
+    } else {
+      for (const k of ['echoCancellation', 'noiseSuppression', 'autoGainControl', 'voiceIsolation']) if (c[k]) adv[k] = false;
+    }
+    if (Object.keys(adv).length && t.applyConstraints) t.applyConstraints({ advanced: [adv] }).catch(() => {});
+  }
 }
 
 function applyMirror() {
@@ -1306,7 +1426,7 @@ function startSegment() {
   }
   const q = qualityOf(prefs.quality);
   const mime = pickMimeType((m) => MediaRecorder.isTypeSupported(m));
-  const bits = fxUsed ? Math.min(q.bits, q.fps >= 60 ? 20e6 : 12e6) : q.bits;
+  const bits = q.bits; // 0.4.1: same bitrate with or without an effect (the old 12 Mbps cap softened faces)
   const opts = { videoBitsPerSecond: bits, audioBitsPerSecond: 160000 };
   if (mime) opts.mimeType = mime;
   let recorder;
@@ -1609,6 +1729,8 @@ function renderTakeUI() {
   $('recTime').textContent = fmtTake(total) + (prefs.maxLen ? ` / ${fmtTake(prefs.maxLen)}` : '');
   $('recTime').classList.toggle('paused', !recording);
   $('segDel').hidden = !segs.length || recording;
+  $('segPlays').hidden = !segs.length || recording || finishing;
+  $('takePlay').hidden = segs.length < 2;
   $('segNext').hidden = !segs.length && !recording;
   $('segDel').classList.toggle('armed', !!delArmedAt);
   $('segDelLabel').textContent = delArmedAt ? 'Tap again' : 'Delete';
@@ -1974,6 +2096,7 @@ async function saveSettings() {
 async function pruneOld() {
   const cutoff = Date.now() - 3 * 864e5;
   for (const c of await clipsStore.all()) {
+    if (c.status === 'done' && c.blobKept) { await blobStore.del(c.id).catch(() => {}); c.blobKept = false; await clipsStore.put(c); }
     if (c.status === 'done' && (c.doneAt || 0) < cutoff) await clipsStore.del(c.id);
   }
 }
@@ -1984,7 +2107,13 @@ async function pruneOld() {
 function bind() {
   // folders
   $('bBack').onclick = () => go(nav.view === 'video' || nav.view === 'wf' ? 'brand' : 'home');
-  $('brandTabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) go('brand', { tab: b.dataset.tab }); };
+  $('brandTabs').onclick = (e) => {
+    const b = e.target.closest('[data-tab]');
+    if (!b) return;
+    if (b.dataset.tab === 'review') { feed.brand = nav.brand; go('feed'); return; }
+    go('brand', { tab: b.dataset.tab });
+  };
+  $('moreBtn').onclick = () => { const m = $('railMore'); m.hidden = !m.hidden; $('moreBtn').classList.toggle('on', !m.hidden); };
   $('wfList').onclick = (e) => {
     if (e.target.closest('a')) return;
     const b = e.target.closest('[data-wf]'); if (b) go('wf', { wf: b.dataset.wf });
@@ -2003,7 +2132,7 @@ function bind() {
   $('wfClips').onclick = onClipAction;
   $('planBox').onclick = onPlanClick;
   $('vPicks').onclick = onPickClick;
-  $('openFeed').onclick = () => go('feed');
+  $('openFeed').onclick = () => { feed.brand = null; go('feed'); };
   $('feedBack').onclick = closeFeed;
   $('feedReload').onclick = () => openFeed(true);
   $('feedList').onclick = onFeedClick;
@@ -2071,6 +2200,12 @@ function bind() {
   $('recBtn').onclick = onRecButton;
   $('segDel').onclick = onDeleteSeg;
   $('segNext').onclick = finishTake;
+  $('segPlay').onclick = playLastPart;
+  $('segBar').onclick = playLastPart;
+  $('takePlay').onclick = playWholeTake;
+  $('plClose').onclick = closePlayer;
+  $('plWhole').onclick = playWholeTake;
+  $('plDelete').onclick = async () => { closePlayer(); delArmedAt = Date.now(); await onDeleteSeg(); };
   $('flipBtn').onclick = flipCamera;
   $('lensBtn').onclick = () => {
     if (recording || lenses.length < 2) return;

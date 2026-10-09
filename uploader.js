@@ -36,7 +36,7 @@ export async function blobToBase64(blob) {
 }
 
 export function createUploader({
-  clips, blobs, getConfig, onChange = () => {},
+  clips, blobs, getConfig, onChange = () => {}, keepBlob = () => false,
   fetchImpl = (...a) => fetch(...a), toBase64 = blobToBase64,
   timeoutMs = 120000, now = () => Date.now(), isOnline = () => (typeof navigator === 'undefined' || navigator.onLine !== false)
 }) {
@@ -87,7 +87,8 @@ export function createUploader({
       onChange(c);
       return;
     }
-    await blobs.del(c.id); // confirmed: free the space on the phone
+    if (keepBlob(c)) c.blobKept = true; // app keeps a few for playback this session; deleted on next launch
+    else await blobs.del(c.id); // confirmed: free the space on the phone
     Object.assign(c, {
       status: 'done', fileId: r.fileId, fileName: r.name || c.fileName, link: r.link || '',
       folder: r.folder || c.folder, doneAt: now(), error: '', offset: blob.size, size: blob.size

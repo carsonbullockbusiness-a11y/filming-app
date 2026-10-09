@@ -1,5 +1,5 @@
 // Pure helpers shared by the app and the Node tests. No DOM access here.
-export const APP_VERSION = '0.4.0';
+export const APP_VERSION = '0.4.1';
 export const TZ = 'America/Los_Angeles';
 export const BRANDS = ['Higgsfield', 'Whop', 'CapCut', 'Composio', 'Makon', 'Strawberry', 'Amboras', 'Teamily', 'FOMO', 'Cheetah', 'Polsia', 'Replit'];
 export const PARTS = ['HOOK', 'INSERT', 'DEMO', 'CTA'];
@@ -14,11 +14,12 @@ export const MAX_VIDEOS = 50;
 export const DEFAULT_EV = { HOOK: 0, INSERT: 0, DEMO: -0.7, CTA: 0 };
 // Quality presets. Width/height are requested as "ideal" (landscape sensor order; the phone rotates for portrait).
 export const QUALITIES = {
-  '720': { w: 1280, h: 720, fps: 30, bits: 5e6, label: '720p · 30fps (smallest)' },
-  '1080': { w: 1920, h: 1080, fps: 30, bits: 12e6, label: '1080p · 30fps' },
-  '1080-60': { w: 1920, h: 1080, fps: 60, bits: 20e6, label: '1080p · 60fps' },
-  '4k': { w: 3840, h: 2160, fps: 30, bits: 45e6, label: '4K · 30fps' },
-  '4k-60': { w: 3840, h: 2160, fps: 60, bits: 65e6, label: '4K · 60fps' }
+  // 0.4.1: bitrates at/above the iPhone Camera app's own (1080p30 ≈ 16 Mbps H.264, 4K30 ≈ 45–50 Mbps) so faces don't smear
+  '720': { w: 1280, h: 720, fps: 30, bits: 8e6, label: '720p · 30fps (smallest)' },
+  '1080': { w: 1920, h: 1080, fps: 30, bits: 18e6, label: '1080p · 30fps' },
+  '1080-60': { w: 1920, h: 1080, fps: 60, bits: 28e6, label: '1080p · 60fps' },
+  '4k': { w: 3840, h: 2160, fps: 30, bits: 50e6, label: '4K · 30fps (sharpest, default)' },
+  '4k-60': { w: 3840, h: 2160, fps: 60, bits: 70e6, label: '4K · 60fps' }
 };
 export const CHUNK_BYTES = 4 * 1024 * 1024; // must match a multiple of 256 KB (server accepts any such size)
 
@@ -166,11 +167,16 @@ export function qualityOf(key) { return QUALITIES[key] || QUALITIES['1080']; }
 
 export function videoConstraints(key, facing, deviceId) {
   const q = qualityOf(key);
-  const v = { width: { ideal: q.w }, height: { ideal: q.h }, frameRate: { ideal: q.fps } };
+  // resizeMode 'none' = native sensor modes only (no browser downscale/crop). backgroundBlur false = no OS/browser
+  // blur effect where the browser exposes it. Unknown constraints are ignored (Safari ignores both).
+  const v = { width: { ideal: q.w }, height: { ideal: q.h }, frameRate: { ideal: q.fps }, resizeMode: { ideal: 'none' }, backgroundBlur: { ideal: false } };
   if (deviceId) v.deviceId = { exact: deviceId };
   else v.facingMode = { ideal: facing };
   return v;
 }
+
+/** Mic with NO voice processing (like the Camera app): no echo cancel, noise gate or auto gain. */
+export const AUDIO_CONSTRAINTS = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: { ideal: 2 }, sampleRate: { ideal: 48000 } };
 
 /** '4K · 60fps', '1080p · 30fps' from the size the camera actually gave us. */
 export function resLabel(w, h, fps) {
