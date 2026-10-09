@@ -228,3 +228,38 @@ details { color: #bbb; font-size: 14px; } details input { margin-top: 8px; }
 .reflist .rl { flex: none; font-size: 11px; font-weight: 800; padding: 3px 7px; border-radius: 6px; background: var(--ref); }
 .reflist li button { flex: none; border: 0; background: none; color: #ff8da3; font-size: 18px; }
 .reflist li.empty { color: #888; border: 0; }
+
+/* 0.4: brand tabs, planner, demo bank, references, review feed */
+.seg.tabs { align-self: stretch; display: flex; }
+.seg.tabs button { flex: 1; }
+.feedcard { background: linear-gradient(135deg, #2a1f4a, #1a1a1a); }
+.planbox { background: #1b2433; border-radius: 14px; padding: 12px 14px; font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
+.planbox b { font-size: 15px; }
+.planbox .step { display: inline-flex; align-items: center; gap: 8px; }
+.planbox .step button { min-width: 34px; height: 30px; border-radius: 10px; border: 0; background: #2c3a52; color: #fff; font-size: 17px; }
+.row.wrap { flex-wrap: wrap; }
+.picks { display: flex; flex-direction: column; gap: 6px; }
+.pick { border: 0; text-align: left; background: #1a1a1a; border-radius: 12px; padding: 10px 12px; color: #fff; display: flex; flex-direction: column; gap: 2px; }
+.pick small { color: #999; }
+.pick.on { background: rgba(33,193,107,.18); }
+.coach { background: #2b2414; color: #f3d38a; border-radius: 12px; padding: 10px 12px; font-size: 13px; }
+.coach b { display: block; margin-bottom: 4px; }
+.coach p { margin: 4px 0 0; }
+#feed { position: fixed; inset: 0; z-index: 30; background: #000; display: flex; flex-direction: column; }
+#feed[hidden] { display: none; }
+.feed-head { position: absolute; top: 0; left: 0; right: 0; z-index: 2; display: flex; justify-content: space-between; align-items: center; padding: calc(env(safe-area-inset-top) + 8px) 12px 8px; }
+#feedList { flex: 1; overflow-y: auto; scroll-snap-type: y mandatory; -webkit-overflow-scrolling: touch; }
+.fcard { height: 100vh; height: 100dvh; scroll-snap-align: start; scroll-snap-stop: always; position: relative; display: flex; flex-direction: column; }
+.fcard video { flex: 1; min-height: 0; width: 100%; object-fit: contain; background: #000; }
+.fcard .load { position: absolute; top: 40%; left: 0; right: 0; text-align: center; color: #aaa; }
+.fcard .finfo { padding: 10px 14px calc(env(safe-area-inset-bottom) + 12px); background: linear-gradient(transparent, rgba(0,0,0,.85) 20%); display: flex; flex-direction: column; gap: 6px; font-size: 13px; max-height: 48%; overflow-y: auto; }
+.fcard .finfo b { font-size: 16px; }
+.fcard .cap { color: #ccc; }
+.badge3 { display: inline-block; padding: 2px 8px; border-radius: 8px; font-weight: 700; font-size: 12px; margin-left: 6px; }
+.badge3.pass { background: #1e5d3a; color: #9ff5c2; } .badge3.flag { background: #6b2020; color: #ffb3b3; } .badge3.none { background: #333; color: #aaa; }
+.fcard .acts { display: flex; gap: 10px; }
+.fcard .acts button { flex: 1; height: 46px; border-radius: 14px; border: 0; font-weight: 700; font-size: 15px; }
+.fcard .ok { background: #21c16b; color: #000; } .fcard .chg { background: #333; color: #fff; }
+.fcard textarea { width: 100%; min-height: 70px; border-radius: 12px; background: #1a1a1a; color: #fff; border: 1px solid #333; padding: 8px; font-size: 15px; }
+.fcard .done { color: #7ef0ad; font-weight: 700; }
+.seg.tabs { background: #1a1a1a; } .seg.tabs button { padding: 10px; font-size: 15px; color: #aaa; } .seg.tabs button.on { background: #fff; color: #000; }

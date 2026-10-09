@@ -117,14 +117,38 @@
 
       <div id="vHome" class="b-view">
         <div class="daybar"><button id="dayPrev" class="ghost small" aria-label="Previous day">‹</button><b id="dayLabel"></b><button id="dayNext" class="ghost small" aria-label="Next day">›</button></div>
+        <button id="openFeed" class="card feedcard"><span class="card-main"><b>▶ Review finals</b><small id="feedHint">Swipe through new edits: approve or ask for changes</small></span><span class="chev">›</span></button>
         <div id="brandList" class="list"></div>
         <div class="row gap"><input id="newBrand" type="text" placeholder="Add a brand" autocomplete="off"><button id="addBrand" class="ghost small">Add</button></div>
       </div>
 
       <div id="vBrand" class="b-view" hidden>
-        <div id="videoList" class="list"></div>
-        <button id="addVideo" class="ghost">+ Add video</button>
-        <p id="brandSync" class="hint"></p>
+        <div id="brandTabs" class="seg tabs"><button data-tab="videos">Videos</button><button data-tab="demos">Demos</button></div>
+        <div id="tabVideos" class="b-view">
+          <div id="planBox" class="planbox" hidden></div>
+          <div id="videoList" class="list"></div>
+          <button id="addVideo" class="ghost">+ Add video</button>
+          <p id="brandSync" class="hint"></p>
+        </div>
+        <div id="tabDemos" class="b-view" hidden>
+          <p id="demoHead" class="hint"></p>
+          <div id="wfList" class="list"></div>
+          <div class="row gap"><input id="newWf" type="text" placeholder="Add a workflow folder" autocomplete="off"><button id="addWf" class="ghost small">Add</button></div>
+          <p id="demoSync" class="hint"></p>
+        </div>
+      </div>
+
+      <div id="vWf" class="b-view" hidden>
+        <div id="wfInfo" class="readybox"></div>
+        <div class="row2">
+          <button id="wfFilm" class="primary">● Film demos</button>
+          <label class="btn"><input type="file" id="wfImport" accept="video/*" multiple hidden>Camera roll</label>
+        </div>
+        <div id="wfLinks" class="row gap wrap"></div>
+        <div id="wfCoach"></div>
+        <h4>On this phone</h4>
+        <div id="wfClips"></div>
+        <p class="hint">Each ✓ saves one demo and uploads it straight into this workflow folder. The camera stays open for the next one. Demos aren't edited until a video uses them.</p>
       </div>
 
       <div id="vVideo" class="b-view" hidden>
@@ -135,6 +159,9 @@
         </div>
         <h4>Clips</h4>
         <div id="vClips"></div>
+        <div id="vCoach"></div>
+        <h4>Today's references <small class="hint">tap to attach</small></h4>
+        <div id="vPicks" class="picks"></div>
         <h4>Reference links</h4>
         <div class="row gap"><input id="vRefUrl" type="text" inputmode="url" placeholder="Paste TikTok / IG / Notion links (several at once is fine)" autocomplete="off"><button id="vRefAdd" class="ghost small">Add</button></div>
         <ul id="vRefList" class="reflist"></ul>
@@ -146,6 +173,12 @@
         <button id="vReopen" class="linkish" hidden>Reopen (still filming)</button>
       </div>
     </div>
+  </section>
+
+  <!-- 0.4: swipe review feed (finals from Drive, streamed through the receiver) -->
+  <section id="feed" hidden>
+    <header class="feed-head"><button id="feedBack" class="pill">‹ Done</button><b id="feedCount"></b><button id="feedReload" class="pill small">↻</button></header>
+    <div id="feedList"></div>
   </section>
 
   <div id="backdrop" hidden></div>

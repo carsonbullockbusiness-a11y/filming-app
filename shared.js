@@ -1,5 +1,5 @@
 // Pure helpers shared by the app and the Node tests. No DOM access here.
-export const APP_VERSION = '0.3.1';
+export const APP_VERSION = '0.4.0';
 export const TZ = 'America/Los_Angeles';
 export const BRANDS = ['Higgsfield', 'Whop', 'CapCut', 'Composio', 'Makon', 'Strawberry', 'Amboras', 'Teamily', 'FOMO', 'Cheetah', 'Polsia', 'Replit'];
 export const PARTS = ['HOOK', 'INSERT', 'DEMO', 'CTA'];
@@ -286,4 +286,45 @@ export function isHttpUrl(u) {
 export function uid() {
   if (globalThis.crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '');
   return Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
+
+/* ---------- 0.4: demo bank + batch planner ---------- */
+/** "Roblox demo 001.mp4" (what the receiver names a bank demo; shown before upload) */
+export function demoFileName(workflow, n, ext = 'mp4') {
+  return `${workflow} demo ${String(n).padStart(3, '0')}.${ext}`;
+}
+
+/**
+ * How many videos to film for a brand in one batch session.
+ * film = ceil(max(0, weekly - inPipeline) / sessions). Same formula as ops/tools/batch_plan.py.
+ * weekly defaults to daily x 7; pipeline = raw-but-unedited + edited-not-approved + approved-not-posted.
+ */
+export function batchPlanFor({ brand, daily = 0, weekly = null, sessions = 2, pipeline = {}, demoShare = 1, bank = 0 }) {
+  const wk = Number.isFinite(Number(weekly)) && weekly !== null ? Number(weekly) : Math.round(Number(daily) * 7);
+  const s = Math.max(1, Math.round(Number(sessions) || 2));
+  const inPipe = ['raw', 'edited', 'approved'].reduce((n, k) => n + (Number(pipeline[k]) || 0), 0);
+  const film = Math.ceil(Math.max(0, wk - inPipe) / s);
+  const demos = Math.ceil(film * Math.max(0, Math.min(1, Number(demoShare)))) ;
+  return {
+    brand, weekly: wk, sessions: s, inPipeline: inPipe, film, demosNeeded: demos, bank: Number(bank) || 0,
+    demosShort: Math.max(0, demos - (Number(bank) || 0)),
+    text: `${brand}: film ${film} this session (target ${wk}/wk, ${inPipe} in pipeline, ${s} session${s === 1 ? '' : 's'})`
+  };
+}
+
+/** Today's reference picks for a brand: plan refs (Notion Trending/New, newest first) + links already used in other videos today. */
+export function referencePicks(planRefs = [], dayVideos = {}, currentVideo = null) {
+  const out = [];
+  const seen = new Set();
+  const add = (r, from) => {
+    if (!r || !isHttpUrl(r.url) || seen.has(r.url)) return;
+    seen.add(r.url);
+    out.push({ url: r.url, title: r.title || r.label || refLabel(r.url), kind: r.kind || from, added: r.added || '' });
+  };
+  planRefs.slice().sort((a, b) => String(b.added || '').localeCompare(String(a.added || ''))).forEach((r) => add(r, 'Format'));
+  Object.keys(dayVideos).forEach((k) => {
+    if (Number(k) === Number(currentVideo)) return;
+    ((dayVideos[k] && dayVideos[k].refLinks) || []).forEach((r) => add({ url: r.url, title: r.label ? `${r.label} (Video ${k})` : `Video ${k} link` }, 'Today'));
+  });
+  return out;
 }

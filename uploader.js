@@ -16,7 +16,8 @@ const ERROR_TEXT = {
   no_config: 'Not connected yet. Open Settings and paste the setup link.',
   'bad brand': 'Brand name has odd characters.',
   'bad part': 'Pick Hook, Insert, Demo or CTA.',
-  'bad video': 'Video number must be 1 to 50.'
+  'bad video': 'Video number must be 1 to 50.',
+  'bad workflow': 'Workflow name: letters and numbers only (max 40).'
 };
 
 export async function blobToBase64(blob) {
@@ -116,7 +117,7 @@ export function createUploader({
         action: 'start', clipId: c.id, brand: c.brand, part: c.part, note: c.note || '',
         recordedAt: c.recordedAt, mimeType: c.mime || blob.type, size: blob.size,
         durationSec: c.durationSec || null, camera: c.camera || '', source: c.source || 'camera', origName: c.origName || '',
-        video: c.video || null, day: c.day || null, width: c.width || null, height: c.height || null, fps: c.fps || null
+        video: c.demo ? null : (c.video || null), demo: c.demo || null, day: c.day || null, width: c.width || null, height: c.height || null, fps: c.fps || null
       });
       if (r.done) return finish(c, r, blob);
       c.uploadId = r.uploadId;
@@ -243,6 +244,14 @@ export function createUploader({
     // Video folders (v0.2): read a brand's day, save one video's links/notes, mark a video done (notifies the editor).
     getDay: (brand, date) => api({ action: 'day', brand, date }),
     saveVideo: (v) => api(Object.assign({ action: 'video' }, v)),
-    markDone: (v) => api(Object.assign({ action: 'done' }, v))
+    markDone: (v) => api(Object.assign({ action: 'done' }, v)),
+    // 0.4: demo bank, finals review feed, batch planner
+    demos: (brand) => api({ action: 'demos', brand }),
+    addDemoWorkflow: (brand, workflow) => api({ action: 'demoAdd', brand, workflow }),
+    finals: (o = {}) => api(Object.assign({ action: 'finals' }, o)),
+    readFinal: (fileId, offset) => api({ action: 'fread', fileId, offset }),
+    review: (fileId, decision, note) => api({ action: 'review', fileId, decision, note }),
+    plan: () => api({ action: 'plan' }),
+    setSessions: (brand, sessions) => api({ action: 'sessions', brand, sessions })
   };
 }

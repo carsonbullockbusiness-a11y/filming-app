@@ -16,7 +16,7 @@ export function postRollReady(pauseTapAt, now, ms = POST_ROLL_MS) {
 
 export function newTake(o) {
   return {
-    id: o.id, brand: o.brand, video: o.video || null, day: o.day || null, part: o.part || 'HOOK',
+    id: o.id, brand: o.brand, video: o.video || null, demo: o.demo || null, day: o.day || null, part: o.part || 'HOOK',
     startedAt: o.startedAt || Date.now(), segs: []
   };
 }

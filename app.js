@@ -2,7 +2,8 @@ import {
   BRANDS, PARTS, PART_LABELS, APP_VERSION, DEFAULT_EV, ptDayKey, ptClock, clipName, pickMimeType,
   decodeSetup, fmtDur, fmtBytes, ringColor, uid, dailyTarget, dayKeyToFolderName, shiftDayKey, dayKeyLabel,
   videoNumbers, mergeVideo, pendingForVideo, extractUrls, refLabel, qualityOf, videoConstraints, resLabel,
-  exposureSupport, clampEv, evFromDrag, evToDarkAlpha, fmtEv, orderParts, isDayKey, ptTimeToken
+  exposureSupport, clampEv, evFromDrag, evToDarkAlpha, fmtEv, orderParts, isDayKey, ptTimeToken,
+  batchPlanFor, referencePicks, isHttpUrl
 } from './shared.js';
 import {
   newTake, takeTotal, addSegment, removeLastSegment, deleteTap, DELETE_CONFIRM_MS, POST_ROLL_MS, barScale, barLayout, fmtTake,
@@ -49,7 +50,7 @@ const isStandalone = window.navigator.standalone === true || window.matchMedia('
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // Where we are: home (brands) -> brand (Video 1..N) -> video (one folder) -> camera (filming into that folder)
-const nav = { view: 'home', day: ptDayKey(), brand: null, video: null };
+const nav = { view: 'home', day: ptDayKey(), brand: null, video: null, wf: null, tab: 'videos' };
 
 const video = $('cam');
 const fxCanvas = $('fx');
@@ -334,11 +335,15 @@ async function onReopen() {
 function go(view, patch = {}) {
   Object.assign(nav, patch, { view });
   if (view === 'camera') { enterCamera(); return; }
+  if (view !== 'wf' && view !== 'camera') nav.wf = null;
+  if (view === 'feed') { openFeed(); return; }
   showBrowser();
   renderBrowser();
   const sc = $('browser');
   sc.scrollTop = 0;
   if ((view === 'brand' || view === 'video') && nav.brand) syncDay(nav.brand, nav.day);
+  if ((view === 'brand' && nav.tab === 'demos') || view === 'wf') loadDemos(nav.brand);
+  if (view === 'brand' || view === 'video') loadPlan();
 }
 
 function showBrowser() {
@@ -364,10 +369,12 @@ function renderBrowser() {
   $('vHome').hidden = nav.view !== 'home';
   $('vBrand').hidden = nav.view !== 'brand';
   $('vVideo').hidden = nav.view !== 'video';
+  $('vWf').hidden = nav.view !== 'wf';
   $('bBack').hidden = nav.view === 'home';
   if (nav.view === 'home') renderHome();
   else if (nav.view === 'brand') renderBrand();
   else if (nav.view === 'video') renderVideo();
+  else if (nav.view === 'wf') renderWf();
 }
 
 function renderHome() {
@@ -395,6 +402,11 @@ function renderBrand() {
   $('bTitle').textContent = brand;
   const t = dailyTarget(brand);
   $('bSub').textContent = `${dayWord(day) ? dayWord(day) + ' · ' : ''}${dayKeyLabel(day)} · target ${t}/day`;
+  document.querySelectorAll('#brandTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === nav.tab));
+  $('tabVideos').hidden = nav.tab !== 'videos';
+  $('tabDemos').hidden = nav.tab !== 'demos';
+  if (nav.tab === 'demos') { renderDemos(); return; }
+  renderPlan();
   const nums = videoNums(st);
   $('videoList').innerHTML = nums.length ? nums.map((k) => {
     const v = st.videos[k] || mergeVideo(null, null);
@@ -417,13 +429,13 @@ function renderBrand() {
 function clipRow(c, withPlace = false) {
   const p = uploader.progressOf(c.id);
   const pct = c.status === 'done' ? 100 : p && p.total ? (p.sent / p.total) * 100 : 0;
-  const name = c.fileName || clipName(c.part, c.brand, new Date(c.recordedAt), c.mime, c.origName, c.video);
+  const name = c.fileName || (c.demo ? `${c.demo} demo (numbered on upload)` : clipName(c.part, c.brand, new Date(c.recordedAt), c.mime, c.origName, c.video));
   let action = '';
   if (c.status === 'draft') action = `<button data-act="tag" data-id="${c.id}">Tag</button>`;
   else if (c.status === 'error') action = `<button data-act="retry" data-id="${c.id}">Retry</button>`;
   else if (c.status === 'done' && c.link) action = `<a href="${esc(c.link)}" target="_blank" rel="noopener">Open</a>`;
   const del = c.status !== 'done' && c.status !== 'uploading' ? `<button data-act="del" data-id="${c.id}" aria-label="Delete">✕</button>` : '';
-  const place = withPlace ? `${c.brand}${c.video ? ' · Video ' + c.video : ''} · ` : '';
+  const place = withPlace ? `${c.brand}${c.demo ? ' · Demo Bank / ' + c.demo : c.video ? ' · Video ' + c.video : ''} · ` : '';
   return `<div class="clip"><span class="tag ${esc(c.part)}">${esc(PART_LABELS[c.part] || c.part)}</span>
     <div class="meta"><b>${esc(name)}</b><small class="${c.status === 'error' ? 'err' : ''}">${esc(place + statusText(c))}${c.note ? ' · “' + esc(c.note) + '”' : ''}</small>
     ${c.status === 'uploading' ? `<div class="bar"><i style="width:${pct.toFixed(0)}%"></i></div>` : ''}</div>${action}${del}</div>`;
@@ -469,6 +481,7 @@ function renderVideo() {
   (v.files || []).filter((f) => !known.has(f.id)).forEach((f) => rows.push(driveRow(f.name, 'FILE', 'In Drive (added outside the app)', f.id)));
   $('vClips').innerHTML = rows.join('') || '<p class="empty">No clips yet. Tap Film, or add from your camera roll.</p>';
 
+  renderPicks(v);
   // reference links
   $('vRefList').innerHTML = v.refLinks.map((r, i) =>
     `<li><span class="rl">${esc(r.label || refLabel(r.url))}</span><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a><button data-i="${i}" aria-label="Remove">✕</button></li>`).join('') ||
@@ -509,6 +522,335 @@ function addVideo() {
   putDay(brand, day, st);
   schedulePush(brand, day, n, 10);
   go('video', { video: n });
+}
+
+/* ------------------------------------------------------------------ */
+/* 0.4: Demo Bank (Brand → Demos → Workflow → film demos)              */
+/* ------------------------------------------------------------------ */
+// Fallback doc links (the plan JSON in Drive overrides / adds more). Higgsfield workflow pages + Carson's "Work" demo script doc.
+const DEMO_DOCS = {
+  Higgsfield: {
+    _script: 'https://docs.google.com/document/d/1uF_SLKA4yW8q1Mv7L4szVfAnTfTvAZbHcOQc_FBXTm0/edit',
+    'Roblox': 'https://higgsgmc.notion.site/Roblox-Workflow-3dd9b8f3eb0b80bfb53ceec3ad8e1703',
+    'YT Faceless': 'https://higgsgmc.notion.site/Youtube-Faceless-Channel-3dd9b8f3eb0b80a88960e06df693d2ad',
+    'Clipping': 'https://higgsgmc.notion.site/Clipping-Workflow-3c29b8f3eb0b8005861ad44b96d519a0',
+    'Real Estate': 'https://higgsgmc.notion.site/Real-Estate-Workflow-3ca9b8f3eb0b80a186cbce51df212dc6',
+    'Meta Ads': 'https://higgsgmc.notion.site/Meta-Ads-Workflow-3c99b8f3eb0b806c8ad0cdd2ea5b7078',
+    'Golf Course': 'https://higgsgmc.notion.site/Golf-Course-Workflow-3ca9b8f3eb0b80d9b757c94b698660cd',
+    'Website Builder': 'https://higgsgmc.notion.site/Website-Builder-3cf9b8f3eb0b804eac15c9dcfbd0dcda',
+    'YT Shorts': 'https://higgsgmc.notion.site/YouTube-Shorts-Workflow-3be9b8f3eb0b80ff8b6eebae16597056',
+    'AI Influencer': 'https://higgsgmc.notion.site/AI-Influencer-Workflow-3e79b8f3eb0b801fb235e1a22afe6ec8'
+  }
+};
+const demoSaved = {};
+let prevPart = null;
+const demoKey = (b) => 'demos:' + b;
+function demoDoc(brand, wf) {
+  const p = (planCache && planCache.plan && planCache.plan.demoDocs && planCache.plan.demoDocs[brand]) || {};
+  const d = DEMO_DOCS[brand] || {};
+  return p[wf] || d[wf] || '';
+}
+function scriptDoc(brand) {
+  const p = (planCache && planCache.plan && planCache.plan.brands && planCache.plan.brands[brand]) || {};
+  return p.demoScriptDoc || (DEMO_DOCS[brand] || {})._script || '';
+}
+const demosLoading = new Set();
+async function loadDemos(brand, force = false) {
+  if (!brand || !cfg.url || demosLoading.has(brand)) return;
+  const have = LS.get(demoKey(brand), null);
+  if (!force && have && Date.now() - have.at < 20000) return;
+  demosLoading.add(brand);
+  try {
+    const r = await uploader.demos(brand);
+    LS.set(demoKey(brand), { at: Date.now(), workflows: r.workflows, brandUrl: r.brandUrl, bankUrl: r.bankUrl, error: '' });
+  } catch (e) {
+    LS.set(demoKey(brand), Object.assign({ workflows: [] }, have || {}, { at: Date.now(), error: e.message }));
+  } finally {
+    demosLoading.delete(brand);
+    if (nav.brand === brand && nav.view !== 'camera') renderBrowser();
+  }
+}
+/** Server count + demos this phone finished uploading since the list was fetched + still uploading. */
+function demoCounts(brand, wf, st) {
+  const mine = allClips.filter((c) => c.brand === brand && c.demo === wf);
+  const after = mine.filter((c) => c.status === 'done' && (c.doneAt || 0) > ((st && st.at) || 0)).length;
+  const w = st && (st.workflows || []).find((x) => x.name === wf);
+  return { inDrive: (w ? w.count : 0) + after, waiting: mine.filter((c) => c.status !== 'done').length, folderUrl: w ? w.folderUrl : '' };
+}
+function renderDemos() {
+  const brand = nav.brand;
+  const st = LS.get(demoKey(brand), null);
+  const wfs = ((st && st.workflows) || []).map((w) => w.name);
+  allClips.filter((c) => c.brand === brand && c.demo && !wfs.includes(c.demo)).forEach((c) => wfs.push(c.demo));
+  const sd = scriptDoc(brand);
+  $('demoHead').innerHTML = `Film demos in batches. Each one lands in Demo Bank / ${esc(brand)} / &lt;workflow&gt; and editors pull from there.` +
+    (sd ? ` <a href="${esc(sd)}" target="_blank" rel="noopener">Demo script doc</a>` : '');
+  $('wfList').innerHTML = wfs.length ? wfs.map((wf) => {
+    const n = demoCounts(brand, wf, st);
+    const doc = demoDoc(brand, wf);
+    const low = n.inDrive + n.waiting <= 3;
+    return `<button class="card" data-wf="${esc(wf)}"><span class="card-main"><b>${esc(wf)}</b><small>${n.inDrive} in bank${n.waiting ? ` · ${n.waiting} uploading` : ''}${low ? ' · low' : ''}</small></span>` +
+      (doc ? `<a class="card-side" href="${esc(doc)}" target="_blank" rel="noopener">Doc ↗</a>` : '') + '<span class="chev">›</span></button>';
+  }).join('') : `<p class="empty">${cfg.url ? (st ? 'No workflow folders for this brand yet. Add one below.' : 'Loading…') : 'Connect Drive in Settings to see the demo bank.'}</p>`;
+  $('demoSync').textContent = !st ? '' : st.error ? 'Problem: ' + st.error : `Demo Bank checked at ${ptClock(new Date(st.at))} PT`;
+}
+async function addWorkflow() {
+  const name = $('newWf').value.trim().replace(/\s+/g, ' ');
+  if (!/^[A-Za-z0-9][A-Za-z0-9 ._&()+-]{0,39}$/.test(name)) { toast('Use letters and numbers only (max 40).'); return; }
+  if (!cfg.url) { toast('Connect Drive first.'); return; }
+  try {
+    await uploader.addDemoWorkflow(nav.brand, name);
+    $('newWf').value = '';
+    await loadDemos(nav.brand, true);
+  } catch (e) { toast(e.message); }
+}
+function renderWf() {
+  const { brand, wf } = nav;
+  const st = LS.get(demoKey(brand), null);
+  const n = demoCounts(brand, wf, st);
+  $('bTitle').textContent = `${wf} demos`;
+  $('bSub').innerHTML = `<b>${esc(brand)}</b> · Demo Bank`;
+  $('wfInfo').textContent = `${n.inDrive} demo${n.inDrive === 1 ? '' : 's'} in the bank${n.waiting ? ` · ${n.waiting} uploading` : ''}` +
+    (demoSaved[brand + '|' + wf] ? ` · ${demoSaved[brand + '|' + wf]} filmed this session` : '');
+  const doc = demoDoc(brand, wf);
+  const sd = scriptDoc(brand);
+  $('wfLinks').innerHTML = [doc && `<a class="btn" href="${esc(doc)}" target="_blank" rel="noopener">Workflow doc ↗</a>`,
+    sd && `<a class="btn" href="${esc(sd)}" target="_blank" rel="noopener">Demo script ↗</a>`,
+    n.folderUrl && `<a class="btn" href="${esc(n.folderUrl)}" target="_blank" rel="noopener">Open in Drive</a>`].filter(Boolean).join('');
+  $('wfCoach').innerHTML = coachHtml(coachFor(brand, [wf]));
+  const mine = allClips.filter((c) => c.brand === brand && c.demo === wf && c.status !== 'done').sort((a, b) => (a.recordedAt || 0) - (b.recordedAt || 0));
+  $('wfClips').innerHTML = mine.map((c) => clipRow(c)).join('') || '<p class="empty">Nothing waiting. Everything filmed here is in Drive.</p>';
+  $('wfFilm').hidden = !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
+/* ------------------------------------------------------------------ */
+/* 0.4: Batch planner (brand screen) + today's references + coach notes */
+/* ------------------------------------------------------------------ */
+let planCache = LS.get('plan', null);
+let planLoading = false;
+async function loadPlan(force = false) {
+  if (!cfg.url || planLoading) return;
+  if (!force && planCache && Date.now() - planCache.fetched < 5 * 60000) return;
+  planLoading = true;
+  try {
+    const r = await uploader.plan();
+    planCache = { fetched: Date.now(), plan: r.plan || {}, sessions: r.sessions || {}, pipeline: r.pipeline || {}, demo: r.demo || {}, coachNotes: r.coachNotes || {} };
+    LS.set('plan', planCache);
+  } catch (e) { /* keep the cached plan */ } finally {
+    planLoading = false;
+    if (nav.view !== 'camera') renderBrowser();
+  }
+}
+function sessionsFor(b) {
+  const local = (prefs.sessions || {})[b];
+  const srv = planCache && planCache.sessions ? planCache.sessions[b] : null;
+  return local || srv || 2;
+}
+function planOf(b) {
+  const p = (planCache && planCache.plan && planCache.plan.brands && planCache.plan.brands[b]) || {};
+  const pipe = (planCache && planCache.pipeline && planCache.pipeline[b]) || {};
+  const bank = (planCache && planCache.demo && planCache.demo[b]) || { total: 0 };
+  return batchPlanFor({ brand: b, daily: p.daily != null ? p.daily : dailyTarget(b), weekly: p.weekly != null ? p.weekly : null,
+    sessions: sessionsFor(b), pipeline: pipe, demoShare: p.demoShare != null ? p.demoShare : (bank.workflows ? 1 : 0), bank: bank.total });
+}
+function renderPlan() {
+  const box = $('planBox');
+  const b = nav.brand;
+  if (!planCache && !cfg.url) { box.hidden = true; return; }
+  const bp = planOf(b);
+  const pipe = (planCache && planCache.pipeline && planCache.pipeline[b]) || {};
+  const all = allBrands().map(planOf).filter((x) => x.film > 0);
+  const total = all.reduce((n, x) => n + x.film, 0);
+  box.hidden = false;
+  box.innerHTML = `<b>${esc(bp.text)}</b>` +
+    `<small class="hint">Pipeline: ${pipe.raw || 0} raw not edited · ${pipe.edited || 0} edited, not approved · ${pipe.approved || 0} approved, not posted</small>` +
+    (bp.demosNeeded ? `<span>Demos: ~${bp.demosNeeded} needed · ${bp.bank} in the bank${bp.demosShort ? ` · film ${bp.demosShort} more` : ' ✓'}</span>` : '') +
+    `<span class="step">Batch sessions / week: <button data-s="-1" aria-label="Fewer">−</button><b>${bp.sessions}</b><button data-s="1" aria-label="More">+</button></span>` +
+    `<small class="hint">This session, all brands: ${total} video${total === 1 ? '' : 's'}${planCache ? ` · updated ${ptClock(new Date(planCache.fetched))} PT` : ''}</small>`;
+}
+async function onPlanClick(e) {
+  const btn = e.target.closest('[data-s]');
+  if (!btn) return;
+  const b = nav.brand;
+  const n = Math.max(1, Math.min(14, sessionsFor(b) + Number(btn.dataset.s)));
+  prefs.sessions = Object.assign({}, prefs.sessions, { [b]: n });
+  savePrefs();
+  renderPlan();
+  if (cfg.url) uploader.setSessions(b, n).then((r) => { if (planCache) { planCache.sessions = r.sessions; LS.set('plan', planCache); } }).catch(() => {});
+}
+/** Coach notes for a brand + any of these format names (case-insensitive), newest first. */
+function coachFor(brand, formats) {
+  const all = (planCache && planCache.coachNotes) || {};
+  const want = new Set(formats.filter(Boolean).map((f) => brand.toLowerCase() + '|' + String(f).toLowerCase().trim()));
+  const out = [];
+  Object.keys(all).forEach((k) => { if (want.has(k.toLowerCase().trim()) && Array.isArray(all[k])) all[k].forEach((n) => out.push(Object.assign({ format: k.split('|').slice(1).join('|') }, n))); });
+  return out.sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 8);
+}
+function coachHtml(list) {
+  if (!list.length) return '';
+  return `<div class="coach"><b>Past coach notes</b>${list.map((n) => `<p>${esc(n.text)} <small>— ${esc(n.coach || 'coach')}${n.at ? ', ' + esc(String(n.at).slice(0, 10)) : ''}${n.format ? ' · ' + esc(n.format) : ''}</small></p>`).join('')}</div>`;
+}
+let picksShown = [];
+function renderPicks(v) {
+  const { brand, day, video: k } = nav;
+  const refs = (planCache && planCache.plan && planCache.plan.brands && planCache.plan.brands[brand] && planCache.plan.brands[brand].refs) || [];
+  picksShown = referencePicks(refs, dayState(brand, day).videos, k).slice(0, 25);
+  const have = new Set(v.refLinks.map((r) => r.url));
+  $('vPicks').innerHTML = picksShown.map((p, i) => `<button class="pick${have.has(p.url) ? ' on' : ''}" data-pick="${i}"><b>${have.has(p.url) ? '✓ ' : ''}${esc(p.title)}</b><small>${esc(p.kind)}${p.added ? ' · ' + esc(p.added) : ''}</small></button>`).join('') ||
+    `<p class="empty">${planCache ? 'No formats listed for this brand yet.' : 'Loading the format list…'}</p>`;
+  const attached = v.refLinks.map((r) => { const p = picksShown.find((x) => x.url === r.url); return (p && p.kind !== 'Today' && p.title) || r.format || ''; });
+  $('vCoach').innerHTML = coachHtml(coachFor(brand, attached));
+}
+function onPickClick(e) {
+  const b = e.target.closest('[data-pick]');
+  if (!b) return;
+  const p = picksShown[Number(b.dataset.pick)];
+  if (!p) return;
+  let added = false;
+  editVideo((v) => {
+    if (v.refLinks.some((r) => r.url === p.url)) { v.refLinks = v.refLinks.filter((r) => r.url !== p.url); return; }
+    v.refLinks = v.refLinks.concat([{ url: p.url, label: p.title }]).slice(0, 50);
+    added = true;
+  });
+  toast(added ? `Attached: ${p.title}` : 'Removed', 1200);
+}
+
+/* ------------------------------------------------------------------ */
+/* 0.4: Swipe review feed (finals streamed from Drive via the receiver) */
+/* ------------------------------------------------------------------ */
+const feed = { items: [], urls: new Map(), loading: new Map(), obs: null, idx: 0 };
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function fetchFinal(f) {
+  if (feed.urls.has(f.fileId)) return feed.urls.get(f.fileId);
+  if (feed.loading.has(f.fileId)) return feed.loading.get(f.fileId);
+  const p = (async () => {
+    const parts = [];
+    let off = 0;
+    for (let guard = 0; guard < 200; guard++) {
+      const r = await uploader.readFinal(f.fileId, off);
+      if (r.data) parts.push(b64ToBytes(r.data));
+      const card = document.querySelector(`.fcard[data-id="${f.fileId}"] .load`);
+      if (card && f.size) card.textContent = `Loading ${Math.min(100, Math.round(((r.next || off) / f.size) * 100))}%…`;
+      if (r.done) break;
+      off = r.next;
+    }
+    const url = URL.createObjectURL(new Blob(parts, { type: f.mimeType || 'video/mp4' }));
+    feed.urls.set(f.fileId, url);
+    return url;
+  })();
+  feed.loading.set(f.fileId, p);
+  try { return await p; } finally { feed.loading.delete(f.fileId); }
+}
+function captionFor(b) {
+  const p = (planCache && planCache.plan && planCache.plan.brands && planCache.plan.brands[b]) || {};
+  return { caption: p.caption || '', musts: p.musts || [] };
+}
+function feedCard(f, i) {
+  const c = captionFor(f.brand);
+  const badge = f.check ? `<span class="badge3 ${f.check.status}">${f.check.status === 'pass' ? '✓ Requirements pass' : '⚠ Flagged'}</span>` : '<span class="badge3 none">Not checked yet</span>';
+  const misses = f.check && f.check.misses && f.check.misses.length ? `<div class="cap">⚠ ${f.check.misses.map(esc).join(' · ')}</div>` : '';
+  const prior = f.decision === 'changes' ? `<div class="cap">Last time you asked: “${esc(f.decisionNote)}”</div>` : '';
+  return `<div class="fcard" data-i="${i}" data-id="${esc(f.fileId)}">
+    <video playsinline webkit-playsinline controls loop preload="auto"></video><div class="load">Loading…</div>
+    <div class="finfo"><div><b>${esc(f.brand)} · ${esc(f.name)}</b>${badge}</div><small class="hint">${esc(f.day)} · ${i + 1} of ${feed.items.length}</small>
+      ${misses}${c.caption ? `<div class="cap"><b>Caption:</b> ${esc(c.caption)}</div>` : ''}
+      ${c.musts.length ? `<div class="cap"><b>Musts:</b> ${c.musts.map(esc).join(' · ')}</div>` : ''}
+      ${prior}${coachHtml(f.coachNotes || [])}
+      <div class="acts"><button class="ok" data-act="approve">✓ Approve</button><button class="chg" data-act="changes">Needs changes</button></div>
+      <div class="chgbox" hidden><textarea placeholder="What should change? (tap the 🎤 on the keyboard to dictate)"></textarea>
+        <div class="acts">${'webkitSpeechRecognition' in window || 'SpeechRecognition' in window ? '<button class="chg" data-act="mic">🎤 Dictate</button>' : ''}<button class="ok" data-act="send">Send to editor</button></div></div>
+      <div class="done" hidden></div><a class="hint" href="${esc(f.url)}" target="_blank" rel="noopener">Open in Drive</a></div></div>`;
+}
+async function openFeed(force = false) {
+  $('browser').hidden = true;
+  $('feed').hidden = false;
+  nav.view = 'feed';
+  if (!cfg.url) { $('feedList').innerHTML = '<p class="empty" style="padding:80px 20px">Connect Drive in Settings first.</p>'; return; }
+  if (feed.items.length && !force) return;
+  $('feedList').innerHTML = '<p class="empty" style="padding:80px 20px">Loading finals…</p>';
+  loadPlan();
+  try {
+    const r = await uploader.finals({ days: 3 });
+    feed.items = r.finals || [];
+  } catch (e) { $('feedList').innerHTML = `<p class="empty" style="padding:80px 20px">Couldn't load: ${esc(e.message)}</p>`; return; }
+  $('feedCount').textContent = `${feed.items.length} to review`;
+  $('feedList').innerHTML = feed.items.map(feedCard).join('') || '<p class="empty" style="padding:80px 20px">Nothing new to review. ✓</p>';
+  $('feedList').scrollTop = 0;
+  if (feed.obs) feed.obs.disconnect();
+  feed.obs = new IntersectionObserver((ents) => ents.forEach((en) => { if (en.isIntersecting && en.intersectionRatio > 0.6) feedShow(Number(en.target.dataset.i)); }), { root: $('feedList'), threshold: [0.6] });
+  document.querySelectorAll('.fcard').forEach((el) => feed.obs.observe(el));
+}
+async function feedShow(i) {
+  feed.idx = i;
+  document.querySelectorAll('.fcard video').forEach((v, j) => { if (j !== i) v.pause(); });
+  // keep only this one and its neighbours in memory
+  feed.items.forEach((f, j) => {
+    if (Math.abs(j - i) > 2 && feed.urls.has(f.fileId)) {
+      URL.revokeObjectURL(feed.urls.get(f.fileId)); feed.urls.delete(f.fileId);
+      const v = document.querySelector(`.fcard[data-i="${j}"] video`); if (v) { v.removeAttribute('src'); v.load(); }
+      const l = document.querySelector(`.fcard[data-i="${j}"] .load`); if (l) l.hidden = false;
+    }
+  });
+  for (const j of [i, i + 1]) {
+    const f = feed.items[j];
+    if (!f) continue;
+    try {
+      const url = await fetchFinal(f);
+      const el = document.querySelector(`.fcard[data-i="${j}"]`);
+      if (!el) continue;
+      const v = el.querySelector('video');
+      if (v.getAttribute('src') !== url) { v.src = url; el.querySelector('.load').hidden = true; }
+      if (j === feed.idx) v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
+    } catch (e) {
+      const l = document.querySelector(`.fcard[data-i="${j}"] .load`); if (l) l.textContent = 'Could not load: ' + e.message;
+    }
+  }
+}
+async function onFeedClick(e) {
+  const btn = e.target.closest('[data-act]');
+  if (!btn) return;
+  const card = btn.closest('.fcard');
+  const f = feed.items[Number(card.dataset.i)];
+  const act = btn.dataset.act;
+  if (act === 'changes') { card.querySelector('.chgbox').hidden = false; card.querySelector('textarea').focus(); return; }
+  if (act === 'mic') {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const r = new SR(); r.lang = 'en-US'; r.interimResults = false;
+    const ta = card.querySelector('textarea');
+    r.onresult = (ev) => { ta.value = (ta.value ? ta.value + ' ' : '') + ev.results[0][0].transcript; };
+    r.onerror = () => toast('Dictation is not available here. Use the 🎤 on the keyboard.');
+    btn.textContent = '🎤 Listening…'; r.onend = () => { btn.textContent = '🎤 Dictate'; };
+    try { r.start(); } catch (err) { toast('Use the 🎤 on the keyboard.'); }
+    return;
+  }
+  if (act !== 'approve' && act !== 'send') return;
+  const note = act === 'send' ? card.querySelector('textarea').value.trim() : '';
+  if (act === 'send' && !note) { toast('Say what should change.'); return; }
+  btn.disabled = true;
+  try {
+    await uploader.review(f.fileId, act === 'approve' ? 'approved' : 'changes', note);
+    f.decision = act === 'approve' ? 'approved' : 'changes';
+    card.querySelector('.acts').hidden = true;
+    card.querySelector('.chgbox').hidden = true;
+    const d = card.querySelector('.done');
+    d.hidden = false;
+    d.textContent = act === 'approve' ? '✓ Approved. Bots will share it with the coach.' : '✓ Sent to the editor.';
+    const next = card.nextElementSibling;
+    if (next) setTimeout(() => next.scrollIntoView({ behavior: 'smooth' }), 600);
+  } catch (err) { toast('Not saved: ' + err.message); btn.disabled = false; }
+}
+function closeFeed() {
+  document.querySelectorAll('.fcard video').forEach((v) => v.pause());
+  feed.urls.forEach((u) => URL.revokeObjectURL(u));
+  feed.urls.clear();
+  feed.items = [];
+  $('feed').hidden = true;
+  go('home');
 }
 
 /* Uploads sheet (every clip still on this device) */
@@ -583,7 +925,8 @@ async function refreshQueueUI() {
 /* ------------------------------------------------------------------ */
 let camIdleTimer = null;
 function enterCamera() {
-  if (!nav.brand || !nav.video) { go('home'); return; }
+  if (!nav.brand || (!nav.video && !nav.wf)) { go('home'); return; }
+  if (nav.wf) { if (prefs.part !== 'DEMO') { prevPart = prefs.part; setPart('DEMO'); } } else if (prevPart) { setPart(prevPart); prevPart = null; }
   nav.view = 'camera';
   $('browser').hidden = true;
   document.body.classList.add('cam');
@@ -604,13 +947,14 @@ function enterCamera() {
 function leaveCamera() {
   if (recording || countdownCancel || finishing) return;
   unarmDelete();
-  go('video');
+  go(nav.wf ? 'wf' : 'video', nav.wf ? { wf: nav.wf } : {});
   clearTimeout(camIdleTimer);
   camIdleTimer = setTimeout(() => { if (nav.view !== 'camera' && !recording) stopCamera(); }, 90000);
 }
 
 function renderCamTop() {
-  $('camTitle').textContent = `${nav.brand} · Video ${nav.video}`;
+  $('camTitle').textContent = nav.wf ? `${nav.brand} · ${nav.wf} demos` : `${nav.brand} · Video ${nav.video}`;
+  $('partSeg').hidden = !!nav.wf;
   document.querySelectorAll('#partSeg button').forEach((b) => b.classList.toggle('on', b.dataset.part === prefs.part));
   updateEvUI();
 }
@@ -895,7 +1239,8 @@ async function saveTake() {
     else await kv.del('takeActive');
   } catch (e) { /* storage problem: the take stays in memory */ }
 }
-const takeHere = () => !!(take && take.brand === nav.brand && Number(take.video) === Number(nav.video) && take.day === nav.day);
+const takeHere = () => !!(take && take.brand === nav.brand && (take.demo || null) === (nav.wf || null) &&
+  (nav.wf ? true : Number(take.video) === Number(nav.video)) && take.day === nav.day);
 
 /** Camera is usable for a new segment (iOS can hand back a dead or muted track after the app was in the background). */
 function camReady() {
@@ -970,14 +1315,14 @@ function startSegment() {
   } catch (e) {
     try { recorder = new MediaRecorder(recStream); } catch (e2) { if (segFx) segFx.stop(); toast('Could not start recording: ' + e2.message); return; }
   }
-  if (!takeHere()) take = newTake({ id: uid(), brand: nav.brand, video: nav.video, day: nav.day, part: prefs.part, startedAt: Date.now() });
+  if (!takeHere()) take = newTake({ id: uid(), brand: nav.brand, video: nav.wf ? null : nav.video, demo: nav.wf || null, day: nav.day, part: nav.wf ? 'DEMO' : prefs.part, startedAt: Date.now() });
   const firstOfTake = !take.segs.length;
   const useChunks = !!prefs.chunked && typeof indexedDB !== 'undefined';
   const r = {
     id: uid(), recorder, useChunks, seq: 0, mem: new Map(), chunks: [], writes: Promise.resolve(), fxTrack: segFx, done: () => {},
     meta: {
       recordedAt: Date.now(), camera: prefs.facing === 'user' ? 'front' : 'back', effect: comp.active ? (prefs.gs !== 'off' ? prefs.gs : 'darken') : 'none',
-      brand: nav.brand, video: nav.video, day: nav.day, part: take.part,
+      brand: nav.brand, video: take.video, demo: take.demo || null, day: nav.day, part: take.part,
       width: fxUsed ? fxCanvas.width : camActual.w, height: fxUsed ? fxCanvas.height : camActual.h, fps: Math.round(camActual.fps || 30),
       takeId: take.id, takeStartedAt: take.startedAt, promptY: firstOfTake ? 0 : prompterY
     }
@@ -1189,8 +1534,8 @@ async function finishTake() {
     const s0 = keep[0];
     const type = String(s0.mime || kb[0].type || 'video/mp4').split(';')[0];
     const base = {
-      camera: s0.camera || '', effect: s0.effect || 'none', source: 'camera', brand: t.brand, video: t.video, day: t.day,
-      part: t.part, status: 'draft', width: s0.width || null, height: s0.height || null, fps: s0.fps || null
+      camera: s0.camera || '', effect: s0.effect || 'none', source: 'camera', brand: t.brand, video: t.demo ? null : t.video, day: t.day,
+      demo: t.demo || null, part: t.demo ? 'DEMO' : t.part, status: 'draft', width: s0.width || null, height: s0.height || null, fps: s0.fps || null
     };
     let items = null;
     let outBlobs = null;
@@ -1232,7 +1577,14 @@ async function finishTake() {
     take = null;
     await saveTake();
     allClips.push(...items);
-    openReview(items, outBlobs);
+    if (t.demo) {
+      // Demo bank: no review sheet. Save + upload, stay on the camera for the next demo.
+      for (const c of items) { c.status = 'queued'; await clipsStore.put(c); }
+      const n = (demoSaved[t.brand + '|' + t.demo] = (demoSaved[t.brand + '|' + t.demo] || 0) + 1);
+      toast(cfg.url ? `✓ ${t.demo} demo saved (${n} this session) · uploading. Ready for the next one.` : 'Demo saved on this phone. Connect Drive to upload.', 2600);
+      refreshQueueUI();
+      uploader.run();
+    } else openReview(items, outBlobs);
   } catch (e) {
     toast('Could not finish the take: ' + ((e && e.message) || e) + '. Your parts are still saved; try ✓ again.', 6000);
   } finally {
@@ -1300,7 +1652,7 @@ async function recoverTakes() {
       if (m.takeId) {
         if (!take || take.id !== m.takeId) {
           if (take && take.segs.length) { /* a different take is open: keep this one as a draft instead */ m.takeId = null; }
-          else take = newTake({ id: m.takeId, brand: m.brand, video: m.video, day: m.day, part: m.part, startedAt: m.takeStartedAt || m.recordedAt });
+          else take = newTake({ id: m.takeId, brand: m.brand, video: m.video, demo: m.demo || null, day: m.day, part: m.part, startedAt: m.takeStartedAt || m.recordedAt });
         }
       }
       if (m.takeId) {
@@ -1324,7 +1676,7 @@ async function recoverTakes() {
         const c = {
           id: uid(), createdAt: Date.now(), recordedAt: m.recordedAt || Date.now(), durationSec: null, mime: type, size: blob.size,
           camera: m.camera || '', effect: m.effect || 'none', source: 'camera', brand: m.brand || BRANDS[0], video: m.video || null,
-          day: m.day || null, part: m.part || 'HOOK', note: 'Recovered take (the app closed while recording)', status: 'draft'
+          day: m.day || null, demo: m.demo || null, part: m.demo ? 'DEMO' : (m.part || 'HOOK'), note: 'Recovered take (the app closed while recording)', status: m.demo ? 'queued' : 'draft'
         };
         await blobStore.put(c.id, blob);
         await clipsStore.put(c);
@@ -1463,8 +1815,8 @@ async function importFiles(files, part) {
     const c = {
       id: uid(), createdAt: Date.now() + items.length, recordedAt: Date.now(), durationSec: null,
       mime: f.type || (part === 'REF' ? 'image/jpeg' : 'video/mp4'), size: f.size, camera: '',
-      source: part === 'REF' ? 'ref' : 'import', origName: f.name || '', brand: nav.brand, video: nav.video, day: nav.day,
-      part: part || prefs.part, note: '', status: part === 'REF' ? 'queued' : 'draft'
+      source: part === 'REF' ? 'ref' : 'import', origName: f.name || '', brand: nav.brand, video: nav.wf ? null : nav.video, day: nav.day,
+      demo: nav.wf || null, part: nav.wf ? 'DEMO' : (part || prefs.part), note: '', status: part === 'REF' || nav.wf ? 'queued' : 'draft'
     };
     try {
       await blobStore.put(c.id, f);
@@ -1631,7 +1983,30 @@ async function pruneOld() {
 /* ------------------------------------------------------------------ */
 function bind() {
   // folders
-  $('bBack').onclick = () => go(nav.view === 'video' ? 'brand' : 'home');
+  $('bBack').onclick = () => go(nav.view === 'video' || nav.view === 'wf' ? 'brand' : 'home');
+  $('brandTabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) go('brand', { tab: b.dataset.tab }); };
+  $('wfList').onclick = (e) => {
+    if (e.target.closest('a')) return;
+    const b = e.target.closest('[data-wf]'); if (b) go('wf', { wf: b.dataset.wf });
+  };
+  $('addWf').onclick = addWorkflow;
+  $('wfFilm').onclick = () => go('camera', { wf: nav.wf, video: null });
+  $('wfImport').onchange = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
+    const { items } = await importFiles(files, 'DEMO');
+    toast(`${items.length} demo(s) uploading to ${nav.wf}`);
+    refreshQueueUI();
+    uploader.run();
+  };
+  $('wfClips').onclick = onClipAction;
+  $('planBox').onclick = onPlanClick;
+  $('vPicks').onclick = onPickClick;
+  $('openFeed').onclick = () => go('feed');
+  $('feedBack').onclick = closeFeed;
+  $('feedReload').onclick = () => openFeed(true);
+  $('feedList').onclick = onFeedClick;
   $('bSettings').onclick = openSettings;
   $('bQueue').onclick = () => (cfg.url ? openUploads() : openSettings());
   $('dayPrev').onclick = () => { nav.day = shiftDayKey(nav.day, -1); renderBrowser(); };
