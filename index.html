@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Grok Film</title>
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Grok Film">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <div id="ringbg"></div>
+
+  <main id="stage">
+    <video id="cam" playsinline webkit-playsinline muted autoplay></video>
+    <canvas id="fx" hidden></canvas>
+    <div id="grid" hidden><i class="v1"></i><i class="v2"></i><i class="h1"></i><i class="h2"></i></div>
+    <div id="safe" hidden><i class="s-top"></i><i class="s-right"></i><i class="s-bottom"></i></div>
+    <div id="prompter" hidden><div id="prompterText"></div></div>
+    <div id="count" hidden></div>
+    <div id="camMsg" hidden></div>
+  </main>
+
+  <header id="top">
+    <button id="brandBtn" class="pill">Higgsfield ▾</button>
+    <div id="partSeg" class="seg">
+      <button data-part="HOOK">Hook</button><button data-part="DEMO">Demo</button><button data-part="CTA">CTA</button>
+    </div>
+    <button id="queueBtn" class="pill small">Set up</button>
+  </header>
+  <div id="recTime" hidden>0:00</div>
+
+  <nav id="rail">
+    <button id="flipBtn" class="tool"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 13a3 3 0 0 1 5.2-2M15 13a3 3 0 0 1-5.2 2M14 9.5v1.7h-1.7M10 16.5v-1.7h1.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Flip</span></button>
+    <button id="lensBtn" class="tool" hidden><b id="lensLabel">1x</b><span>Lens</span></button>
+    <button id="ringBtn" class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/></svg><span>Ring</span></button>
+    <button id="gsBtn" class="tool"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="10.5" r="2.6" fill="currentColor"/><path d="M7 19c.8-3 2.8-4.5 5-4.5s4.2 1.5 5 4.5" fill="currentColor"/></svg><span>Green screen</span></button>
+    <button id="timerBtn" class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 9v4l2.5 2M9.5 3h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span id="timerLabel">Timer</span></button>
+    <button id="scriptBtn" class="tool"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 10h6M9 13.5h6M9 17h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Script</span></button>
+    <button id="gridBtn" class="tool"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17" stroke="currentColor" stroke-width="1.2"/></svg><span id="gridLabel">Grid</span></button>
+    <button id="settingsBtn" class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.8 1.8M16.7 16.7l1.8 1.8M5.5 18.5l1.8-1.8M16.7 7.3l1.8-1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span>Settings</span></button>
+  </nav>
+
+  <footer id="bottom">
+    <button id="batchBtn" class="side"><span id="batchBadge" class="badge" hidden>0</span><svg viewBox="0 0 24 24"><rect x="4" y="6" width="13" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 3h10a2 2 0 0 1 2 2v12" fill="none" stroke="currentColor" stroke-width="1.8"/></svg><span>Batch</span></button>
+    <button id="recBtn" aria-label="Record"><i></i></button>
+    <label id="importBtn" class="side"><input type="file" id="importInput" accept="video/*" multiple hidden><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 16V9M8.8 12l3.2-3.2 3.2 3.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Upload</span></label>
+  </footer>
+
+  <!-- Quick panels -->
+  <section id="p-ring" class="panel" hidden>
+    <div class="row"><b>Ring light</b><label class="switch"><input type="checkbox" id="ringOn"><span></span></label></div>
+    <label class="range">Brightness <input type="range" id="ringBright" min="20" max="100"></label>
+    <label class="range"><span class="split"><span>Cool</span><span>Warm</span></span><input type="range" id="ringWarm" min="0" max="100"></label>
+    <label class="range">Ring size <input type="range" id="ringSize" min="6" max="30"></label>
+    <p class="hint">Turn your phone brightness all the way up. Best with the front camera.</p>
+  </section>
+
+  <section id="p-gs" class="panel" hidden>
+    <b>Background</b>
+    <div id="gsModes" class="chips">
+      <button class="chip" data-gs="off">Off</button>
+      <button class="chip" data-gs="blur">Blur</button>
+      <button class="chip" data-gs="image">Photo / video</button>
+      <button class="chip" data-gs="chroma">Real green screen</button>
+    </div>
+    <div class="row gap">
+      <label class="btn"><input type="file" id="bgInput" accept="image/*,video/*" hidden>Choose background</label>
+      <div id="bgThumb"></div>
+    </div>
+    <p id="gsStatus" class="hint"></p>
+    <p class="hint">Photo / video and Blur cut you out automatically. "Real green screen" is for an actual green backdrop.</p>
+  </section>
+
+  <section id="p-script" class="panel" hidden>
+    <div class="row"><b>Script on screen</b><label class="switch"><input type="checkbox" id="scriptOn"><span></span></label></div>
+    <textarea id="scriptText" rows="4" placeholder="Paste your hook or script here"></textarea>
+    <label class="range">Scroll speed <input type="range" id="scriptSpeed" min="0" max="120"></label>
+    <label class="range">Text size <input type="range" id="scriptSize" min="18" max="48"></label>
+    <p class="hint">Scrolls when you hit record. Tap the text to pause or practice.</p>
+  </section>
+
+  <div id="backdrop" hidden></div>
+
+  <!-- Review after each take -->
+  <section id="s-review" class="sheet" hidden>
+    <video id="reviewVid" playsinline webkit-playsinline loop controls></video>
+    <p id="reviewInfo" class="sub"></p>
+    <h4>Brand</h4>
+    <div id="reviewBrands" class="chips scroll"></div>
+    <h4>Part</h4>
+    <div id="reviewParts" class="chips"></div>
+    <input id="reviewNote" type="text" placeholder="Note for the editor (optional)" autocomplete="off">
+    <div class="actions">
+      <button id="retakeBtn" class="ghost">Retake</button>
+      <button id="saveBtn" class="primary">Save &amp; upload</button>
+    </div>
+    <button id="photosBtn" class="linkish">Also save a copy to Photos</button>
+  </section>
+
+  <!-- Brand picker -->
+  <section id="s-brand" class="sheet" hidden>
+    <div class="sheet-head"><h3>Brand</h3><button class="linkish" data-close>Done</button></div>
+    <div id="brandList" class="chips"></div>
+    <div class="row gap"><input id="newBrand" type="text" placeholder="Add a brand" autocomplete="off"><button id="addBrand" class="ghost small">Add</button></div>
+  </section>
+
+  <!-- Batch -->
+  <section id="s-batch" class="sheet tall" hidden>
+    <div class="sheet-head"><h3>Today's batch</h3><button class="linkish" data-close>Done</button></div>
+    <div id="batchBrands" class="chips scroll"></div>
+    <p id="batchDay" class="sub"></p>
+    <div id="batchClips"></div>
+    <h4>Instructions for the editor</h4>
+    <textarea id="batchInstr" rows="4" placeholder="e.g. Use hook take 2, cut the pause at 0:04, white bold captions"></textarea>
+    <h4>Reference links</h4>
+    <div class="row gap"><input id="refUrl" type="url" inputmode="url" placeholder="Paste a TikTok / IG / Notion link" autocomplete="off"><button id="refAdd" class="ghost small">Add</button></div>
+    <ul id="refList"></ul>
+    <label class="btn wide"><input type="file" id="refFiles" accept="image/*,video/*" multiple hidden>Add reference screenshots / videos</label>
+    <div class="row"><b>Done filming, ready for editor</b><label class="switch"><input type="checkbox" id="batchReady"><span></span></label></div>
+    <button id="batchSave" class="primary">Save notes to Drive</button>
+    <p id="batchStatus" class="hint"></p>
+  </section>
+
+  <!-- Settings -->
+  <section id="s-settings" class="sheet tall" hidden>
+    <div class="sheet-head"><h3>Settings</h3><button class="linkish" data-close>Done</button></div>
+    <p id="connState" class="conn"></p>
+    <h4>Connect to Drive</h4>
+    <div class="row gap"><input id="cfgLink" type="text" placeholder="Paste the setup link" autocomplete="off"><button id="pasteLink" class="ghost small">Paste</button></div>
+    <details>
+      <summary>Or enter URL and key by hand</summary>
+      <input id="cfgUrl" type="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
+      <input id="cfgKey" type="password" placeholder="Upload key" autocomplete="off">
+    </details>
+    <button id="cfgSave" class="primary">Save &amp; test connection</button>
+    <h4>Camera</h4>
+    <label class="field">Video quality
+      <select id="quality"><option value="720">720p (smallest files)</option><option value="1080">1080p (recommended)</option><option value="4k">4K (if your camera allows)</option></select>
+    </label>
+    <label class="field">Auto-stop after
+      <select id="maxLen"><option value="0">No limit</option><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">60 seconds</option><option value="180">3 minutes</option></select>
+    </label>
+    <p id="camInfo" class="hint"></p>
+    <h4>Phone storage</h4>
+    <p id="storageInfo" class="hint"></p>
+    <button id="retryAll" class="ghost">Retry failed uploads</button>
+    <button id="clearDone" class="ghost">Clear the uploaded list</button>
+    <p id="versionInfo" class="hint"></p>
+  </section>
+
+  <div id="installTip" hidden>
+    <b>Install it:</b> tap <span class="share">Share</span> then <b>Add to Home Screen</b>.
+    <button id="tipClose" class="linkish">OK</button>
+  </div>
+  <div id="toast" hidden></div>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
