@@ -1,6 +1,6 @@
 // Tiny IndexedDB wrapper. Clips are kept here (not in the camera roll) until Drive confirms the upload.
 const DB_NAME = 'grok-film';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // v2 adds 'recparts' (crash-safe recording pieces)
 let dbPromise = null;
 
 function openDb() {
@@ -12,6 +12,7 @@ function openDb() {
         if (!db.objectStoreNames.contains('clips')) db.createObjectStore('clips', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('blobs')) db.createObjectStore('blobs');
         if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+        if (!db.objectStoreNames.contains('recparts')) db.createObjectStore('recparts');
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -64,4 +65,34 @@ export const kv = {
   get: (k) => tx('kv', 'readonly', (s) => s.get(k)),
   set: (k, v) => tx('kv', 'readwrite', (s) => s.put(v, k)),
   del: (k) => tx('kv', 'readwrite', (s) => s.delete(k))
+};
+
+/**
+ * Pieces of the take being recorded (MediaRecorder timeslice), written to disk as they arrive so a
+ * long 4K take is not held in memory and survives Safari being killed. Key: "<recId>:<000123>".
+ */
+const partKey = (recId, seq) => `${recId}:${String(seq).padStart(6, '0')}`;
+export const recParts = {
+  async put(recId, seq, blob) {
+    try {
+      await tx('recparts', 'readwrite', (s) => s.put(blob, partKey(recId, seq)));
+    } catch (e) {
+      const buf = await blob.arrayBuffer();
+      await tx('recparts', 'readwrite', (s) => s.put({ __buf: buf, type: blob.type }, partKey(recId, seq)));
+    }
+  },
+  async list(recId) {
+    const range = IDBKeyRange.bound(recId + ':', recId + ':\uffff');
+    const keys = await tx('recparts', 'readonly', (s) => s.getAllKeys(range));
+    const vals = await tx('recparts', 'readonly', (s) => s.getAll(range));
+    return (keys || []).map((k, i) => {
+      const v = vals[i];
+      return { seq: Number(String(k).split(':')[1]), blob: v && v.__buf ? new Blob([v.__buf], { type: v.type }) : v };
+    });
+  },
+  delAll: (recId) => tx('recparts', 'readwrite', (s) => s.delete(IDBKeyRange.bound(recId + ':', recId + ':\uffff'))),
+  async recIds() {
+    const keys = await tx('recparts', 'readonly', (s) => s.getAllKeys());
+    return [...new Set((keys || []).map((k) => String(k).split(':')[0]))];
+  }
 };

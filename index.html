@@ -25,22 +25,27 @@
     <div id="grid" hidden><i class="v1"></i><i class="v2"></i><i class="h1"></i><i class="h2"></i></div>
     <div id="safe" hidden><i class="s-top"></i><i class="s-right"></i><i class="s-bottom"></i></div>
     <div id="prompter" hidden><div id="prompterText"></div></div>
+    <div id="evBar" hidden><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><b id="evVal">±0.0</b><small id="evMode"></small></div>
     <div id="count" hidden></div>
     <div id="camMsg" hidden></div>
   </main>
 
   <header id="top">
-    <button id="brandBtn" class="pill">Higgsfield ▾</button>
-    <div id="partSeg" class="seg">
-      <button data-part="HOOK">Hook</button><button data-part="DEMO">Demo</button><button data-part="CTA">CTA</button>
-    </div>
+    <button id="camBack" class="pill">‹ <span id="camTitle">Video</span></button>
     <button id="queueBtn" class="pill small">Set up</button>
   </header>
+  <div id="subTop">
+    <div id="partSeg" class="seg">
+      <button data-part="HOOK">Hook</button><button data-part="INSERT">Insert</button><button data-part="DEMO">Demo</button><button data-part="CTA">CTA</button>
+    </div>
+    <span id="resBadge" class="badge2"></span>
+  </div>
   <div id="recTime" hidden>0:00</div>
 
   <nav id="rail">
     <button id="flipBtn" class="tool"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 13a3 3 0 0 1 5.2-2M15 13a3 3 0 0 1-5.2 2M14 9.5v1.7h-1.7M10 16.5v-1.7h1.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Flip</span></button>
     <button id="lensBtn" class="tool" hidden><b id="lensLabel">1x</b><span>Lens</span></button>
+    <button id="evBtn" class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/></svg><span id="evLabel">Exposure</span></button>
     <button id="ringBtn" class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/></svg><span>Ring</span></button>
     <button id="gsBtn" class="tool"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="10.5" r="2.6" fill="currentColor"/><path d="M7 19c.8-3 2.8-4.5 5-4.5s4.2 1.5 5 4.5" fill="currentColor"/></svg><span>Green screen</span></button>
     <button id="timerBtn" class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 9v4l2.5 2M9.5 3h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span id="timerLabel">Timer</span></button>
@@ -50,12 +55,21 @@
   </nav>
 
   <footer id="bottom">
-    <button id="batchBtn" class="side"><span id="batchBadge" class="badge" hidden>0</span><svg viewBox="0 0 24 24"><rect x="4" y="6" width="13" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 3h10a2 2 0 0 1 2 2v12" fill="none" stroke="currentColor" stroke-width="1.8"/></svg><span>Batch</span></button>
+    <button id="folderBtn" class="side"><span id="folderBadge" class="badge" hidden>0</span><svg viewBox="0 0 24 24"><path d="M3.5 6.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg><span>Folder</span></button>
     <button id="recBtn" aria-label="Record"><i></i></button>
     <label id="importBtn" class="side"><input type="file" id="importInput" accept="video/*" multiple hidden><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 16V9M8.8 12l3.2-3.2 3.2 3.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Upload</span></label>
   </footer>
 
   <!-- Quick panels -->
+  <section id="p-ev" class="panel" hidden>
+    <div class="row"><b>Exposure · <span id="evPart">Demo</span></b><span id="evNow" class="hint"></span></div>
+    <p id="evSupport" class="hint"></p>
+    <label class="range"><span class="split"><span>Darker</span><span>Brighter</span></span><input type="range" id="evRange" min="-2" max="2" step="0.1"></label>
+    <div id="darkRow" class="row" hidden><span><b>Darken (fallback)</b><br><small class="hint">Darkens the picture in the app. Records at 1080p max while on.</small></span><label class="switch"><input type="checkbox" id="darkOn"><span></span></label></div>
+    <div class="row gap"><button id="evReset" class="ghost small">Reset to 0</button><button id="evDemo" class="ghost small">Demo preset −0.7</button></div>
+    <p class="hint">Tip: drag up or down on the camera to change it. Each part (Hook, Insert, Demo, CTA) remembers its own setting.</p>
+  </section>
+
   <section id="p-ring" class="panel" hidden>
     <div class="row"><b>Ring light</b><label class="switch"><input type="checkbox" id="ringOn"><span></span></label></div>
     <label class="range">Brightness <input type="range" id="ringBright" min="20" max="100"></label>
@@ -88,16 +102,59 @@
     <p class="hint">Scrolls when you hit record. Tap the text to pause or practice.</p>
   </section>
 
+  <!-- Folders (home -> brand -> video). Covers the camera until you tap Film. -->
+  <section id="browser">
+    <div class="b-wrap">
+      <header class="b-head">
+        <button id="bBack" class="b-back" hidden aria-label="Back">‹</button>
+        <div class="b-title"><h2 id="bTitle">Grok Film</h2><p id="bSub" class="sub"></p></div>
+        <button id="bQueue" class="pill small">Set up</button>
+        <button id="bSettings" class="b-icon" aria-label="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.8 1.8M16.7 16.7l1.8 1.8M5.5 18.5l1.8-1.8M16.7 7.3l1.8-1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+      </header>
+
+      <div id="vHome" class="b-view">
+        <div class="daybar"><button id="dayPrev" class="ghost small" aria-label="Previous day">‹</button><b id="dayLabel"></b><button id="dayNext" class="ghost small" aria-label="Next day">›</button></div>
+        <div id="brandList" class="list"></div>
+        <div class="row gap"><input id="newBrand" type="text" placeholder="Add a brand" autocomplete="off"><button id="addBrand" class="ghost small">Add</button></div>
+      </div>
+
+      <div id="vBrand" class="b-view" hidden>
+        <div id="videoList" class="list"></div>
+        <button id="addVideo" class="ghost">+ Add video</button>
+        <p id="brandSync" class="hint"></p>
+      </div>
+
+      <div id="vVideo" class="b-view" hidden>
+        <div id="vReadyBox" class="readybox" hidden></div>
+        <div class="row2">
+          <button id="filmBtn" class="primary">● Film</button>
+          <label class="btn"><input type="file" id="vImport" accept="video/*" multiple hidden>Camera roll</label>
+        </div>
+        <h4>Clips</h4>
+        <div id="vClips"></div>
+        <h4>Reference links</h4>
+        <div class="row gap"><input id="vRefUrl" type="text" inputmode="url" placeholder="Paste TikTok / IG / Notion links (several at once is fine)" autocomplete="off"><button id="vRefAdd" class="ghost small">Add</button></div>
+        <ul id="vRefList" class="reflist"></ul>
+        <label class="btn wide"><input type="file" id="vRefFiles" accept="image/*,video/*" multiple hidden>Add reference screenshots / videos</label>
+        <h4>Notes for the editor</h4>
+        <textarea id="vNotes" rows="4" placeholder="e.g. Use hook take 2, keep the pause at 0:04, no zoom on the demo"></textarea>
+        <p id="vSync" class="hint"></p>
+        <button id="vDone" class="primary done">Done · send to editor</button>
+        <button id="vReopen" class="linkish" hidden>Reopen (still filming)</button>
+      </div>
+    </div>
+  </section>
+
   <div id="backdrop" hidden></div>
 
   <!-- Review after each take -->
   <section id="s-review" class="sheet" hidden>
     <video id="reviewVid" playsinline webkit-playsinline loop controls></video>
     <p id="reviewInfo" class="sub"></p>
-    <h4>Brand</h4>
-    <div id="reviewBrands" class="chips scroll"></div>
     <h4>Part</h4>
     <div id="reviewParts" class="chips"></div>
+    <h4>Video</h4>
+    <div id="reviewVideos" class="chips scroll"></div>
     <input id="reviewNote" type="text" placeholder="Note for the editor (optional)" autocomplete="off">
     <div class="actions">
       <button id="retakeBtn" class="ghost">Retake</button>
@@ -106,28 +163,11 @@
     <button id="photosBtn" class="linkish">Also save a copy to Photos</button>
   </section>
 
-  <!-- Brand picker -->
-  <section id="s-brand" class="sheet" hidden>
-    <div class="sheet-head"><h3>Brand</h3><button class="linkish" data-close>Done</button></div>
-    <div id="brandList" class="chips"></div>
-    <div class="row gap"><input id="newBrand" type="text" placeholder="Add a brand" autocomplete="off"><button id="addBrand" class="ghost small">Add</button></div>
-  </section>
-
-  <!-- Batch -->
-  <section id="s-batch" class="sheet tall" hidden>
-    <div class="sheet-head"><h3>Today's batch</h3><button class="linkish" data-close>Done</button></div>
-    <div id="batchBrands" class="chips scroll"></div>
-    <p id="batchDay" class="sub"></p>
-    <div id="batchClips"></div>
-    <h4>Instructions for the editor</h4>
-    <textarea id="batchInstr" rows="4" placeholder="e.g. Use hook take 2, cut the pause at 0:04, white bold captions"></textarea>
-    <h4>Reference links</h4>
-    <div class="row gap"><input id="refUrl" type="url" inputmode="url" placeholder="Paste a TikTok / IG / Notion link" autocomplete="off"><button id="refAdd" class="ghost small">Add</button></div>
-    <ul id="refList"></ul>
-    <label class="btn wide"><input type="file" id="refFiles" accept="image/*,video/*" multiple hidden>Add reference screenshots / videos</label>
-    <div class="row"><b>Done filming, ready for editor</b><label class="switch"><input type="checkbox" id="batchReady"><span></span></label></div>
-    <button id="batchSave" class="primary">Save notes to Drive</button>
-    <p id="batchStatus" class="hint"></p>
+  <!-- Every clip still on this device -->
+  <section id="s-uploads" class="sheet tall" hidden>
+    <div class="sheet-head"><h3>Uploads on this device</h3><button class="linkish" data-close>Done</button></div>
+    <div id="upClips"></div>
+    <button id="upRetry" class="ghost">Retry failed uploads</button>
   </section>
 
   <!-- Settings -->
@@ -144,11 +184,12 @@
     <button id="cfgSave" class="primary">Save &amp; test connection</button>
     <h4>Camera</h4>
     <label class="field">Video quality
-      <select id="quality"><option value="720">720p (smallest files)</option><option value="1080">1080p (recommended)</option><option value="4k">4K (if your camera allows)</option></select>
+      <select id="quality"><option value="720">720p · 30fps (smallest files)</option><option value="1080">1080p · 30fps</option><option value="1080-60">1080p · 60fps</option><option value="4k">4K · 30fps</option><option value="4k-60">4K · 60fps</option></select>
     </label>
     <label class="field">Auto-stop after
       <select id="maxLen"><option value="0">No limit</option><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">60 seconds</option><option value="180">3 minutes</option></select>
     </label>
+    <div class="row"><span><b>Crash-safe recording</b><br><small class="hint">Saves each take to the phone every 2 seconds while filming, so long 4K takes don't run out of memory.</small></span><label class="switch"><input type="checkbox" id="chunkedRec"><span></span></label></div>
     <p id="camInfo" class="hint"></p>
     <h4>Phone storage</h4>
     <p id="storageInfo" class="hint"></p>

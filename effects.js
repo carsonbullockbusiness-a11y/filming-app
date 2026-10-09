@@ -2,6 +2,7 @@
 // Person cut-out: MediaPipe Selfie Segmenter (tasks-vision, loaded from CDN only when first used).
 // Fallback / "Green" mode: classic chroma key for a real green backdrop.
 // Output: a <canvas> we draw every camera frame into; recording uses canvas.captureStream().
+// Also used for the optional "Darken" fallback (when the browser can't control camera exposure).
 
 const TV_VERSION = '0.10.17';
 const TV_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TV_VERSION}`;
@@ -23,6 +24,7 @@ export class Compositor {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.mode = 'off'; // off | blur | image | chroma
+    this.darkAlpha = 0; // 0..1 black layer on top (Darken fallback)
     this.bg = null; // HTMLImageElement or HTMLVideoElement
     this.bgUrl = null;
     this.seg = null;
@@ -43,7 +45,13 @@ export class Compositor {
     this.frameCb = this.frame.bind(this);
   }
 
-  get active() { return this.mode !== 'off'; }
+  get active() { return this.mode !== 'off' || this.darkAlpha > 0; }
+
+  /** Darken fallback: 0 = off. Starts/stops the canvas loop as needed. */
+  setDarken(alpha) {
+    this.darkAlpha = Math.max(0, Math.min(0.9, Number(alpha) || 0));
+    if (this.active) this.start(); else this.stop();
+  }
 
   get canRecord() { return typeof this.canvas.captureStream === 'function'; }
 
@@ -52,7 +60,7 @@ export class Compositor {
     this.hasMask = false;
     this.prev = null;
     this.maskImg = null;
-    if (mode === 'off') { this.stop(); return; }
+    if (mode === 'off') { if (!this.active) this.stop(); return; }
     this.start();
     if (mode === 'blur' || mode === 'image') await this.ensureSegmenter();
   }
@@ -148,10 +156,11 @@ export class Compositor {
     const [W, H] = this.resize(v.videoWidth, v.videoHeight);
     const ctx = this.ctx;
 
+    if (this.mode === 'off') { ctx.drawImage(v, 0, 0, W, H); this.applyDarken(W, H); return; }
     if (this.mode === 'chroma') this.chromaMask(v);
     else if (this.seg) this.segMask(v);
 
-    if (!this.hasMask) { ctx.drawImage(v, 0, 0, W, H); return; }
+    if (!this.hasMask) { ctx.drawImage(v, 0, 0, W, H); this.applyDarken(W, H); return; }
 
     // 1) background
     if ((this.mode === 'image' || this.mode === 'chroma') && this.bg) this.drawCover(this.bg, W, H);
@@ -167,6 +176,15 @@ export class Compositor {
     p.drawImage(this.mask, 0, 0, W, H);
     p.globalCompositeOperation = 'source-over';
     ctx.drawImage(this.person, 0, 0);
+    this.applyDarken(W, H);
+  }
+
+  applyDarken(W, H) {
+    if (!(this.darkAlpha > 0)) return;
+    const ctx = this.ctx;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = `rgba(0,0,0,${this.darkAlpha})`;
+    ctx.fillRect(0, 0, W, H);
   }
 
   drawBlur(v, W, H) {
