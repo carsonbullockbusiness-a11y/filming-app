@@ -93,6 +93,27 @@ button { cursor: pointer; }
 #recBtn i { width: 64px; height: 64px; border-radius: 50%; background: var(--red); transition: all .18s; }
 .recording #recBtn i { width: 30px; height: 30px; border-radius: 7px; }
 
+/* Multi-segment takes (TikTok-style): progress bar with ticks, total time, ⌫ delete-last, ✓ finish */
+#segBar { position: absolute; top: calc(var(--st) + 2px); left: 10px; right: 10px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.28); overflow: hidden; z-index: 7; pointer-events: none; }
+#segBar i { position: absolute; top: 0; bottom: 0; background: var(--red); }
+#segBar i + i { border-left: 2px solid #fff; }
+#segBar i.live { background: #ff6b86; }
+#segBar i.saving { opacity: .75; }
+#segBar i.armed { background: #ffd60a; animation: segBlink .5s ease-in-out infinite alternate; }
+@keyframes segBlink { from { opacity: 1; } to { opacity: .45; } }
+#recTime.paused { background: rgba(0,0,0,.55); top: calc(var(--st) + 150px); }
+#folderBtn, #segDel { grid-column: 1; grid-row: 1; }
+#recBtn { grid-column: 2; grid-row: 1; }
+#importBtn, #segNext { grid-column: 3; grid-row: 1; }
+.take #folderBtn, .take #importBtn { display: none; }
+.recording #bottom #segNext { opacity: 1; pointer-events: auto; }
+.recording #folderBtn, .recording #importBtn { visibility: hidden; }
+#segDel.armed { background: #ffd60a; color: #000; }
+#segNext .check { width: 34px; height: 34px; border-radius: 50%; background: var(--red); display: flex; align-items: center; justify-content: center; }
+#segNext .check svg { width: 22px; height: 22px; }
+#segNext small { font-size: 9px; opacity: .8; min-height: 0; }
+#segNext:disabled { opacity: .5; }
+
 /* ---------- panels & sheets ---------- */
 .panel { position: absolute; left: 10px; right: 76px; bottom: calc(var(--sb) + 120px); z-index: 8; background: rgba(18,18,18,.94); border-radius: 18px; padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.4); }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }

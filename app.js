@@ -2,8 +2,13 @@ import {
   BRANDS, PARTS, PART_LABELS, APP_VERSION, DEFAULT_EV, ptDayKey, ptClock, clipName, pickMimeType,
   decodeSetup, fmtDur, fmtBytes, ringColor, uid, dailyTarget, dayKeyToFolderName, shiftDayKey, dayKeyLabel,
   videoNumbers, mergeVideo, pendingForVideo, extractUrls, refLabel, qualityOf, videoConstraints, resLabel,
-  exposureSupport, clampEv, evFromDrag, evToDarkAlpha, fmtEv, orderParts, isDayKey
+  exposureSupport, clampEv, evFromDrag, evToDarkAlpha, fmtEv, orderParts, isDayKey, ptTimeToken
 } from './shared.js';
+import {
+  newTake, takeTotal, addSegment, removeLastSegment, deleteTap, DELETE_CONFIRM_MS, barScale, barLayout, fmtTake,
+  segmentClipPlan, mergeSegNote, userPartOfNote, pruneMissing
+} from './segments.js';
+import { joinFmp4, fmp4Duration } from './mp4join.js';
 import { clipsStore, blobStore, kv, recParts } from './store.js';
 import { createUploader } from './uploader.js';
 import { Compositor } from './effects.js';
@@ -478,6 +483,8 @@ function renderVideo() {
   $('vDone').disabled = !!v.doneRequested;
   $('vReopen').hidden = !v.ready || !!v.doneRequested;
   $('filmBtn').hidden = !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  const mine = take && take.segs.length && take.brand === brand && take.day === day && Number(take.video) === Number(k);
+  $('filmBtn').textContent = mine ? `● Continue take (${take.segs.length} part${take.segs.length > 1 ? 's' : ''} · ${fmtTake(takeTotal(take))})` : '● Film';
 }
 
 function addRefsFromInput() {
@@ -583,11 +590,20 @@ function enterCamera() {
   clearTimeout(camIdleTimer);
   renderCamTop();
   refreshQueueUI();
-  if (!streamLive()) startCamera(); else applyEv(true);
+  renderTakeUI();
+  if (!camReady()) startCamera(); else applyEv(true);
+  if (take && take.segs.length && !takeHere()) {
+    // only one take at a time: an unfinished take from another video gets finished (review sheet) first
+    toast(`Finishing your unfinished ${take.brand} · Video ${take.video} take first.`, 3000);
+    finishTake();
+  } else if (takeHere() && take.segs.length) {
+    toast(`Take in progress: ${take.segs.length} part${take.segs.length > 1 ? 's' : ''}, ${fmtTake(takeTotal(take))}. Tap record to keep going, ⌫ to delete the last part, ✓ to finish.`, 3500);
+  }
 }
 
 function leaveCamera() {
-  if (recording || countdownCancel) return;
+  if (recording || countdownCancel || finishing) return;
+  unarmDelete();
   go('video');
   clearTimeout(camIdleTimer);
   camIdleTimer = setTimeout(() => { if (nav.view !== 'camera' && !recording) stopCamera(); }, 90000);
@@ -790,6 +806,7 @@ function setPart(p) {
   if (!PARTS.includes(p)) return;
   prefs.part = p;
   savePrefs();
+  if (takeHere() && take.part !== p) { take.part = p; saveTake(); }
   renderCamTop();
   applyEv(true);
   if (evActive() && curEv() !== 0) flashEvBar(1200);
@@ -849,26 +866,59 @@ function bindStageGestures() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Recording (crash-safe: pieces go to IndexedDB every 2 s)            */
+/* Recording: TikTok-style takes made of segments                      */
+/* Record, pause (switch apps, lock the screen), record more, delete   */
+/* the last segment, then ✓ joins them into one clip.                  */
+/* Each segment is its own MediaRecorder run; its pieces go to         */
+/* IndexedDB every 2 s (crash-safe) and the finished segment is kept   */
+/* in blobStore until the take is finished or the segment is deleted.  */
 /* ------------------------------------------------------------------ */
 let recording = false;
-let rec = null;
+let rec = null;            // the segment being recorded right now
 let recStartedAt = 0;
 let recTimer = null;
-let fxTrack = null;
 let countdownCancel = null;
+let take = null;           // the take being built; survives pauses, app switches and restarts
+let segSaving = Promise.resolve();
+let delArmedAt = 0;
+let delArmTimer = null;
+let finishing = false;
+let finishAfterStop = false;
+let liveSec = 0;
+
+const metaKey = (id) => 'recMeta:' + id;
+async function saveTake() {
+  try {
+    if (take && (take.segs.length || recording)) await kv.set('takeActive', take);
+    else await kv.del('takeActive');
+  } catch (e) { /* storage problem: the take stays in memory */ }
+}
+const takeHere = () => !!(take && take.brand === nav.brand && Number(take.video) === Number(nav.video) && take.day === nav.day);
+
+/** Camera is usable for a new segment (iOS can hand back a dead or muted track after the app was in the background). */
+function camReady() {
+  return streamLive() && stream.getTracks().every((t) => t.readyState === 'live' && !t.muted);
+}
 
 async function onRecButton() {
   closePanels();
+  unarmDelete();
   if (countdownCancel) { countdownCancel(); return; }
-  if (recording) { stopRecording(); return; }
+  if (recording) { pauseSegment(); return; }
+  if (finishing) return;
   if (!window.MediaRecorder) { toast('This browser cannot record video. Update iOS (14.3 or newer).'); return; }
-  if (!streamLive()) { await startCamera(); if (!streamLive()) return; }
+  if (take && !takeHere() && take.segs.length) { await finishTake(); return; }
+  if (take && prefs.maxLen && takeTotal(take) >= prefs.maxLen - 0.2) {
+    toast(`This take is at the ${prefs.maxLen}s limit. Tap ✓ to finish it, or delete the last part.`, 3500);
+    return;
+  }
+  await segSaving;
+  if (!camReady()) { await startCamera(); if (!streamLive()) return; }
   if (prefs.countdown) {
     const go2 = await runCountdown(prefs.countdown);
     if (!go2) return;
   }
-  startRecording();
+  startSegment();
 }
 
 function runCountdown(n) {
@@ -894,13 +944,14 @@ function runCountdown(n) {
   });
 }
 
-function startRecording() {
+function startSegment() {
   let recStream = stream;
   let fxUsed = false;
+  let segFx = null;
   if (comp.active) {
     if (comp.canRecord) {
-      fxTrack = comp.captureTrack(camActual.fps >= 50 ? 60 : 30);
-      recStream = new MediaStream([fxTrack].concat(stream.getAudioTracks()));
+      segFx = comp.captureTrack(camActual.fps >= 50 ? 60 : 30);
+      recStream = new MediaStream([segFx].concat(stream.getAudioTracks()));
       fxUsed = true;
     } else {
       toast('This phone cannot record the effect, recording the plain camera.');
@@ -915,19 +966,22 @@ function startRecording() {
   try {
     recorder = new MediaRecorder(recStream, opts);
   } catch (e) {
-    try { recorder = new MediaRecorder(recStream); } catch (e2) { toast('Could not start recording: ' + e2.message); return; }
+    try { recorder = new MediaRecorder(recStream); } catch (e2) { if (segFx) segFx.stop(); toast('Could not start recording: ' + e2.message); return; }
   }
+  if (!takeHere()) take = newTake({ id: uid(), brand: nav.brand, video: nav.video, day: nav.day, part: prefs.part, startedAt: Date.now() });
+  const firstOfTake = !take.segs.length;
   const useChunks = !!prefs.chunked && typeof indexedDB !== 'undefined';
   const r = {
-    id: uid(), recorder, useChunks, seq: 0, mem: new Map(), chunks: [], writes: Promise.resolve(),
+    id: uid(), recorder, useChunks, seq: 0, mem: new Map(), chunks: [], writes: Promise.resolve(), fxTrack: segFx, done: () => {},
     meta: {
       recordedAt: Date.now(), camera: prefs.facing === 'user' ? 'front' : 'back', effect: comp.active ? (prefs.gs !== 'off' ? prefs.gs : 'darken') : 'none',
-      brand: nav.brand, video: nav.video, day: nav.day, part: prefs.part,
-      width: fxUsed ? fxCanvas.width : camActual.w, height: fxUsed ? fxCanvas.height : camActual.h, fps: Math.round(camActual.fps || 30)
+      brand: nav.brand, video: nav.video, day: nav.day, part: take.part,
+      width: fxUsed ? fxCanvas.width : camActual.w, height: fxUsed ? fxCanvas.height : camActual.h, fps: Math.round(camActual.fps || 30),
+      takeId: take.id, takeStartedAt: take.startedAt, promptY: firstOfTake ? 0 : prompterY
     }
   };
   r.meta.recId = r.id;
-  if (useChunks) kv.set('recActive', r.meta).catch(() => {});
+  if (useChunks) kv.set(metaKey(r.id), r.meta).catch(() => {});
   recorder.ondataavailable = (e) => {
     if (!e.data || !e.data.size) return;
     if (!r.useChunks) { r.chunks.push(e.data); return; }
@@ -938,41 +992,58 @@ function startRecording() {
   recorder.onstop = () => onRecorderStop(r);
   recorder.onerror = (e) => toast('Recording error: ' + ((e.error && e.error.message) || 'unknown'));
   try {
-    if (useChunks) recorder.start(2000); else recorder.start();
+    if (useChunks) recorder.start(2000); else recorder.start(1000);
   } catch (e) {
+    if (segFx) segFx.stop();
     toast('Could not start recording: ' + e.message);
     return;
   }
   rec = r;
   recording = true;
   recStartedAt = performance.now();
+  liveSec = 0;
   document.body.classList.add('recording');
-  $('recTime').textContent = '0:00';
-  $('recTime').hidden = false;
-  recTimer = setInterval(tickRec, 250);
-  startPrompter();
+  recTimer = setInterval(tickRec, 200);
+  startPrompter(firstOfTake);
   wake(true);
+  saveTake();
+  renderTakeUI();
 }
 
 function tickRec() {
-  const s = (performance.now() - recStartedAt) / 1000;
-  $('recTime').textContent = fmtDur(s);
-  if (prefs.maxLen && s >= prefs.maxLen) stopRecording();
+  liveSec = (performance.now() - recStartedAt) / 1000;
+  const total = takeTotal(take, liveSec);
+  renderTakeUI();
+  if (prefs.maxLen && total >= prefs.maxLen) { finishAfterStop = true; pauseSegment(); }
 }
 
-function stopRecording() {
+/** Ends the current segment (record button, app switch, screen lock, auto-stop). The take stays open. */
+function pauseSegment() {
   if (!recording || !rec) return;
+  const r = rec;
   recording = false;
+  rec = null;
   clearInterval(recTimer);
-  rec.meta.durationSec = Math.round((performance.now() - recStartedAt) / 100) / 10;
-  try { rec.recorder.stop(); } catch (e) { /* already stopped */ }
+  const dur = Math.round((performance.now() - recStartedAt) / 100) / 10;
+  liveSec = 0;
+  r.meta.durationSec = dur;
+  const m = r.meta;
+  // placeholder right away so the bar and the order are correct; filled in once the bytes are saved
+  addSegment(take, {
+    id: r.id, startedAt: m.recordedAt, durationSec: dur, camera: m.camera, effect: m.effect, width: m.width || null,
+    height: m.height || null, fps: m.fps || null, promptY: m.promptY, saving: true
+  });
+  segSaving = new Promise((res) => { r.done = res; });
+  try { r.recorder.stop(); } catch (e) { onRecorderStop(r); }
   document.body.classList.remove('recording');
-  $('recTime').hidden = true;
   stopPrompter();
+  renderTakeUI();
 }
 
 async function onRecorderStop(r) {
-  if (fxTrack) { fxTrack.stop(); fxTrack = null; }
+  if (r.stopped) return;
+  r.stopped = true;
+  if (r.fxTrack) { r.fxTrack.stop(); r.fxTrack = null; }
   const type = ((r.recorder && r.recorder.mimeType) || 'video/mp4').split(';')[0] || 'video/mp4';
   let blob;
   if (r.useChunks) {
@@ -984,62 +1055,276 @@ async function onRecorderStop(r) {
     blob = new Blob(r.chunks, { type });
     r.chunks = [];
   }
-  if (!blob.size) { toast('Nothing was recorded. Try again.'); return; }
-  const m = r.meta;
-  const c = {
-    id: uid(), createdAt: Date.now(), recordedAt: m.recordedAt, durationSec: m.durationSec,
-    mime: type, size: blob.size, camera: m.camera, effect: m.effect, source: 'camera',
-    brand: m.brand, video: m.video, day: m.day, part: m.part, note: '', status: 'draft',
-    width: m.width || null, height: m.height || null, fps: m.fps || null
-  };
+  const seg = take && take.segs.find((s) => s.id === r.id);
   try {
-    await blobStore.put(c.id, blob);
-    await clipsStore.put(c);
-    if (r.useChunks) { recParts.delAll(r.id).catch(() => {}); kv.del('recActive').catch(() => {}); }
+    if (!blob.size) throw Object.assign(new Error('empty'), { empty: true });
+    await blobStore.put(r.id, blob);
+    if (seg) Object.assign(seg, { saving: false, mime: type, size: blob.size });
+    else await blobStore.del(r.id); // the take was thrown away meanwhile
+    await saveTake(); // record the part in the take BEFORE dropping its crash-safe pieces
+    if (r.useChunks) { recParts.delAll(r.id).catch(() => {}); kv.del(metaKey(r.id)).catch(() => {}); }
   } catch (e) {
-    toast('Phone storage is full. Clear space; the take stays saved in pieces and comes back next time you open the app.', 6000);
-    return;
+    if (seg) take.segs.splice(take.segs.indexOf(seg), 1);
+    toast(e && e.empty ? 'Nothing was recorded. Try again.'
+      : 'Phone storage is full. Clear space; this part stays saved in pieces and comes back next time you open the app.', 6000);
+    finishAfterStop = false;
   }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-  allClips.push(c);
-  openReview([c], [blob]);
+  await saveTake();
+  r.done();
+  renderTakeUI();
+  if (finishAfterStop) { finishAfterStop = false; finishTake(); }
 }
 
-/** A take that was recording when Safari closed/crashed comes back as a draft in its video folder. */
+function unarmDelete() {
+  if (!delArmedAt) return;
+  delArmedAt = 0;
+  clearTimeout(delArmTimer);
+  renderTakeUI();
+}
+
+/** ⌫: first tap marks the last segment, second tap (within 3 s) deletes it. Repeat to keep going back. */
+async function onDeleteSeg() {
+  if (recording || finishing || countdownCancel) return;
+  await segSaving;
+  if (!take || !take.segs.length) return;
+  const t = deleteTap(delArmedAt, Date.now());
+  if (t.action === 'arm') {
+    delArmedAt = t.armedAt;
+    clearTimeout(delArmTimer);
+    delArmTimer = setTimeout(unarmDelete, DELETE_CONFIRM_MS);
+    renderTakeUI();
+    return;
+  }
+  delArmedAt = 0;
+  clearTimeout(delArmTimer);
+  const s = removeLastSegment(take);
+  await blobStore.del(s.id).catch(() => {});
+  recParts.delAll(s.id).catch(() => {});
+  if (s.promptY != null) { prompterY = s.promptY; setPrompterY(); }
+  const left = take.segs.length;
+  const total = takeTotal(take);
+  if (!left) take = null;
+  await saveTake();
+  renderTakeUI();
+  toast(left ? `Deleted the last part. Back to ${fmtTake(total)}.` : 'Deleted. Start a new take.', 1800);
+}
+
+/** Resolves true unless the video fires an error while loading (iOS may not preload; that's not a failure). */
+function playable(blob, ms = 6000) {
+  return new Promise((resolve) => {
+    const v = document.createElement('video');
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = 'metadata';
+    const url = URL.createObjectURL(blob);
+    let timer = null;
+    const done = (ok) => {
+      clearTimeout(timer);
+      v.onloadedmetadata = v.onerror = null;
+      v.removeAttribute('src');
+      try { v.load(); } catch (e) { /* ignore */ }
+      URL.revokeObjectURL(url);
+      resolve(ok);
+    };
+    v.onloadedmetadata = () => done(true);
+    v.onerror = () => done(false);
+    timer = setTimeout(() => done(true), ms);
+    v.src = url;
+  });
+}
+
+/**
+ * ✓: joins the take's segments into ONE clip (lossless fMP4 join, see mp4join.js) and opens the
+ * review sheet. If this phone's recordings can't be joined, the segments become separate clips
+ * with JOIN notes and in-order names, and the editor concatenates them.
+ */
+async function finishTake() {
+  if (finishing) return;
+  if (recording) { finishAfterStop = true; pauseSegment(); return; }
+  unarmDelete();
+  await segSaving;
+  if (!take || !take.segs.length) { toast('Record something first.'); return; }
+  finishing = true;
+  renderTakeUI();
+  const t = take;
+  try {
+    const blobs = [];
+    for (const s of t.segs) blobs.push(await blobStore.get(s.id).catch(() => null));
+    const keep = t.segs.filter((s, i) => blobs[i] && blobs[i].size);
+    const kb = blobs.filter((b) => b && b.size);
+    if (!keep.length) { toast('The recorded parts are missing from this phone. Start a new take.', 4000); take = null; await saveTake(); return; }
+    t.segs = keep;
+    const s0 = keep[0];
+    const type = String(s0.mime || kb[0].type || 'video/mp4').split(';')[0];
+    const base = {
+      camera: s0.camera || '', effect: s0.effect || 'none', source: 'camera', brand: t.brand, video: t.video, day: t.day,
+      part: t.part, status: 'draft', width: s0.width || null, height: s0.height || null, fps: s0.fps || null
+    };
+    let items = null;
+    let outBlobs = null;
+    let why = '';
+    if (keep.length === 1) {
+      const c = Object.assign({}, base, { id: s0.id, createdAt: Date.now(), recordedAt: t.startedAt, durationSec: takeTotal(t), mime: type, size: kb[0].size, note: '' });
+      await clipsStore.put(c);
+      items = [c]; outBlobs = [kb[0]];
+    } else if (/mp4/.test(type) && kb.every((b) => /mp4/.test(b.type || type))) {
+      toast(`Joining ${keep.length} parts…`, 1500);
+      try {
+        const j = await joinFmp4(kb, type);
+        if (!(await playable(j.blob))) throw new Error('the joined file did not open');
+        const c = Object.assign({}, base, {
+          id: uid(), createdAt: Date.now(), recordedAt: t.startedAt, durationSec: takeTotal(t), mime: type, size: j.blob.size,
+          note: '', segments: keep.length
+        });
+        await blobStore.put(c.id, j.blob);
+        await clipsStore.put(c);
+        for (const s of keep) await blobStore.del(s.id).catch(() => {});
+        items = [c]; outBlobs = [j.blob];
+      } catch (e) {
+        why = (e && e.message) || String(e);
+      }
+    } else why = 'not MP4';
+    if (!items) {
+      // Fallback: one clip per kept segment (the segment's bytes are already stored under its id: no copy).
+      const plan = segmentClipPlan(t, ptTimeToken);
+      items = keep.map((s, i) => Object.assign({}, base, {
+        id: s.id, createdAt: Date.now() + i, recordedAt: plan[i].recordedAt, durationSec: s.durationSec, mime: s.mime || type, size: kb[i].size,
+        note: plan[i].note, segIndex: plan[i].index, segCount: plan[i].count, takeTag: plan[i].takeTag,
+        width: s.width || base.width, height: s.height || base.height, fps: s.fps || base.fps, camera: s.camera || base.camera
+      }));
+      for (const c of items) await clipsStore.put(c);
+      outBlobs = kb;
+      console.warn('Grok Film: segments not joined on the phone:', why);
+      toast(`Couldn't join the ${keep.length} parts on this phone, so they upload as ${keep.length} files in order and the editor joins them.`, 5000);
+    }
+    take = null;
+    await saveTake();
+    allClips.push(...items);
+    openReview(items, outBlobs);
+  } catch (e) {
+    toast('Could not finish the take: ' + ((e && e.message) || e) + '. Your parts are still saved; try ✓ again.', 6000);
+  } finally {
+    finishing = false;
+    renderTakeUI();
+  }
+}
+
+/** Progress bar with ticks, total time, ⌫ and ✓. */
+function renderTakeUI() {
+  const segs = takeHere() ? take.segs : [];
+  const has = segs.length > 0 || recording;
+  document.body.classList.toggle('take', has && !recording);
+  $('segBar').hidden = !has;
+  const total = takeTotal(takeHere() ? take : null, recording ? liveSec : 0);
+  const pieces = barLayout(segs, recording ? liveSec : null, barScale(prefs.maxLen, total));
+  $('segBar').innerHTML = pieces.map((p, i) => {
+    const cls = p.live ? 'live' : (delArmedAt && i === segs.length - 1 ? 'armed' : '') + (segs[i] && segs[i].saving ? ' saving' : '');
+    return `<i class="${cls}" style="left:${p.left.toFixed(2)}%;width:${p.width.toFixed(2)}%"></i>`;
+  }).join('');
+  $('recTime').hidden = !has;
+  $('recTime').textContent = fmtTake(total) + (prefs.maxLen ? ` / ${fmtTake(prefs.maxLen)}` : '');
+  $('recTime').classList.toggle('paused', !recording);
+  $('segDel').hidden = !segs.length || recording;
+  $('segNext').hidden = !segs.length && !recording;
+  $('segDel').classList.toggle('armed', !!delArmedAt);
+  $('segDelLabel').textContent = delArmedAt ? 'Tap again' : 'Delete';
+  $('segNext').disabled = finishing;
+  $('segCount').textContent = segs.length > 1 || (segs.length && recording) ? `${segs.length + (recording ? 1 : 0)} parts` : '';
+}
+
+/**
+ * On launch: restore the take in progress, and turn recording pieces left by a crash into either
+ * a segment of that take (when it was part of one) or a draft clip in its video folder.
+ */
 async function recoverTakes() {
-  let meta = null;
-  try { meta = await kv.get('recActive'); } catch (e) { return; }
+  let saved = null;
+  let legacy = null;
+  try { saved = await kv.get('takeActive'); legacy = await kv.get('recActive'); } catch (e) { return; }
+  if (saved && Array.isArray(saved.segs)) {
+    const have = [];
+    for (const s of saved.segs) {
+      const b = await blobStore.get(s.id).catch(() => null);
+      if (b && b.size) { have.push(s.id); if (!s.size) s.size = b.size; if (!s.mime) s.mime = b.type; }
+      s.saving = false;
+    }
+    pruneMissing(saved, have);
+    take = saved;
+  }
   let ids = [];
-  try { ids = await recParts.recIds(); } catch (e) { return; }
-  let n = 0;
+  try { ids = await recParts.recIds(); } catch (e) { ids = []; }
+  let drafts = 0;
+  let segsBack = 0;
   for (const id of ids) {
     if (rec && rec.id === id) continue;
-    const saved = await recParts.list(id).catch(() => []);
-    const parts = orderParts(saved.filter((p) => p.blob));
+    const got = await recParts.list(id).catch(() => []);
+    const parts = orderParts(got.filter((p) => p.blob));
     if (!parts.length) { await recParts.delAll(id).catch(() => {}); continue; }
-    const m = meta && meta.recId === id ? meta : {};
+    let m = await kv.get(metaKey(id)).catch(() => null);
+    if (!m && legacy && legacy.recId === id) m = legacy;
+    m = m || {};
     const type = String(parts[0].type || 'video/mp4').split(';')[0] || 'video/mp4';
     const blob = new Blob(parts, { type });
-    const c = {
-      id: uid(), createdAt: Date.now(), recordedAt: m.recordedAt || Date.now(), durationSec: null, mime: type, size: blob.size,
-      camera: m.camera || '', effect: m.effect || 'none', source: 'camera', brand: m.brand || BRANDS[0], video: m.video || null,
-      day: m.day || null, part: m.part || 'HOOK', note: 'Recovered take (the app closed while recording)', status: 'draft'
-    };
     try {
-      await blobStore.put(c.id, blob);
-      await clipsStore.put(c);
+      if (m.takeId) {
+        if (!take || take.id !== m.takeId) {
+          if (take && take.segs.length) { /* a different take is open: keep this one as a draft instead */ m.takeId = null; }
+          else take = newTake({ id: m.takeId, brand: m.brand, video: m.video, day: m.day, part: m.part, startedAt: m.takeStartedAt || m.recordedAt });
+        }
+      }
+      if (m.takeId) {
+        if (!take.segs.some((s) => s.id === id)) {
+          const d = /mp4/.test(type) ? await fmp4Duration(blob) : null;
+          if (/mp4/.test(type) && !(d > 0.2)) { // only the header made it to disk: nothing to keep
+            await recParts.delAll(id).catch(() => {});
+            kv.del(metaKey(id)).catch(() => {});
+            continue;
+          }
+          await blobStore.put(id, blob);
+          addSegment(take, {
+            id, startedAt: m.recordedAt || Date.now(), durationSec: d ? Math.round(d * 10) / 10 : 0, mime: type, size: blob.size,
+            camera: m.camera || '', effect: m.effect || 'none', width: m.width || null, height: m.height || null, fps: m.fps || null,
+            promptY: m.promptY, recovered: true
+          });
+          take.segs.sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
+          segsBack++;
+        }
+      } else {
+        const c = {
+          id: uid(), createdAt: Date.now(), recordedAt: m.recordedAt || Date.now(), durationSec: null, mime: type, size: blob.size,
+          camera: m.camera || '', effect: m.effect || 'none', source: 'camera', brand: m.brand || BRANDS[0], video: m.video || null,
+          day: m.day || null, part: m.part || 'HOOK', note: 'Recovered take (the app closed while recording)', status: 'draft'
+        };
+        await blobStore.put(c.id, blob);
+        await clipsStore.put(c);
+        drafts++;
+      }
       await recParts.delAll(id);
-      n++;
+      kv.del(metaKey(id)).catch(() => {});
     } catch (e) { /* storage full: leave the pieces for next time */ }
   }
   kv.del('recActive').catch(() => {});
-  if (n) toast(`Recovered ${n} take(s) that were recording when the app closed. They're in their video folder as drafts.`, 5000);
+  if (take && !take.segs.length) take = null;
+  await saveTake();
+  if (drafts) toast(`Recovered ${drafts} take(s) that were recording when the app closed. They're in their video folder as drafts.`, 5000);
+  else if (take) toast(`Your ${take.brand} · Video ${take.video} take is still here (${take.segs.length} part${take.segs.length > 1 ? 's' : ''}, ${fmtTake(takeTotal(take))}${segsBack ? ', including the part that was recording when the app closed' : ''}). Open the camera to keep going.`, 5000);
 }
 
 /* ------------------------------------------------------------------ */
 /* Review + tag (after a take, or after importing clips)              */
 /* ------------------------------------------------------------------ */
-const review = { items: null, blobs: null, part: '', video: null, url: null };
+const review = { items: null, blobs: null, part: '', video: null, url: null, idx: 0 };
+
+/** Shows blob i in the review player. A take that uploads as separate parts plays them one after another. */
+function reviewPlay(i) {
+  const v = $('reviewVid');
+  review.idx = i;
+  if (review.url) URL.revokeObjectURL(review.url);
+  review.url = URL.createObjectURL(review.blobs[i]);
+  v.loop = review.blobs.length === 1;
+  v.src = review.url;
+  v.play().catch(() => {});
+}
 
 function openReview(items, blobs) {
   review.items = items;
@@ -1047,12 +1332,10 @@ function openReview(items, blobs) {
   const first = items[0];
   review.part = PARTS.includes(first.part) ? first.part : prefs.part;
   review.video = first.video || null;
-  if (review.url) URL.revokeObjectURL(review.url);
-  review.url = URL.createObjectURL(blobs[0]);
   const v = $('reviewVid');
-  v.src = review.url;
-  v.play().catch(() => {});
-  $('reviewNote').value = first.note && !/^Recovered take/.test(first.note) ? first.note : '';
+  v.onended = () => { if (review.blobs && review.blobs.length > 1 && first.segCount) reviewPlay((review.idx + 1) % review.blobs.length); };
+  reviewPlay(0);
+  $('reviewNote').value = first.note && !/^Recovered take/.test(first.note) ? userPartOfNote(first.note) : '';
   renderChips($('reviewParts'), PARTS.map((p) => ({ v: p, label: PART_LABELS[p] })), review.part, (p) => { review.part = p; reviewInfo(); }, 'part');
   const day = first.day || ptDayKey(new Date(first.recordedAt));
   const opts = videoNums(dayState(first.brand, day)).map((k) => ({ v: k, label: 'Video ' + k }));
@@ -1071,13 +1354,17 @@ function reviewInfo() {
   const day = c.day || ptDayKey(new Date(c.recordedAt));
   const name = clipName(review.part, c.brand, new Date(c.recordedAt), c.mime, c.origName, review.video);
   const res = c.width && c.height ? ` · ${resLabel(c.width, c.height, c.fps)}` : '';
-  $('reviewInfo').textContent = (review.items.length > 1 ? `${review.items.length} clips · ` : '') +
-    (c.durationSec ? fmtDur(c.durationSec) + ' · ' : '') + fmtBytes(size) + res +
+  const dur = review.items.reduce((n, x) => n + (Number(x.durationSec) || 0), 0);
+  const multi = review.items.length > 1;
+  $('reviewInfo').textContent = (multi ? (c.segCount ? `${review.items.length} parts, uploaded in order for the editor to join · ` : `${review.items.length} clips · `)
+    : c.segments ? `${c.segments} parts joined · ` : '') +
+    (dur ? fmtDur(dur) + ' · ' : '') + fmtBytes(size) + res +
     ` → ${c.brand} / ${dayKeyToFolderName(day)}${review.video ? ' / Video ' + review.video : ''} / ${review.items.length > 1 ? review.part + '_…' : name}`;
 }
 
 function hideReview() {
   const v = $('reviewVid');
+  v.onended = null;
   v.pause();
   v.removeAttribute('src');
   v.load();
@@ -1094,7 +1381,7 @@ async function saveReview() {
   const note = $('reviewNote').value.trim();
   const first = review.items[0];
   for (const c of review.items) {
-    Object.assign(c, { part: review.part, video: review.video, note, status: 'queued' });
+    Object.assign(c, { part: review.part, video: review.video, note: c.segCount ? mergeSegNote(c.note, note) : note, status: 'queued' });
     if (!c.day) c.day = ptDayKey(new Date(c.recordedAt));
     await clipsStore.put(c);
   }
@@ -1115,7 +1402,8 @@ async function discardReview(fromBackdrop = false) {
     refreshQueueUI();
     return;
   }
-  if (c.source === 'camera' && (c.durationSec || 0) > 5 && !confirm('Delete this take?')) return;
+  const len = review.items.reduce((n, x) => n + (Number(x.durationSec) || 0), 0);
+  if (c.source === 'camera' && len > 5 && !confirm('Delete this take?')) return;
   for (const x of review.items) {
     await blobStore.del(x.id).catch(() => {});
     await clipsStore.del(x.id).catch(() => {});
@@ -1237,9 +1525,10 @@ function applyScript() {
   if (document.activeElement !== $('scriptText')) $('scriptText').value = s.text;
 }
 function setPrompterY() { $('prompterText').style.transform = `translateY(${-prompterY}px)`; }
-function startPrompter() {
+/** reset = start of a new take; later segments of the same take continue where the text paused. */
+function startPrompter(reset = true) {
   if ($('prompter').hidden) return;
-  prompterY = 0;
+  if (reset) prompterY = 0;
   prompterPaused = false;
   prompterLast = performance.now();
   setPrompterY();
@@ -1374,6 +1663,8 @@ function bind() {
   $('camBack').onclick = leaveCamera;
   $('folderBtn').onclick = leaveCamera;
   $('recBtn').onclick = onRecButton;
+  $('segDel').onclick = onDeleteSeg;
+  $('segNext').onclick = finishTake;
   $('flipBtn').onclick = flipCamera;
   $('lensBtn').onclick = () => {
     if (recording || lenses.length < 2) return;
@@ -1443,7 +1734,7 @@ function bind() {
   $('scriptOn').onchange = (e) => { prefs.script.on = e.target.checked; savePrefs(); applyScript(); };
   $('scriptSpeed').oninput = (e) => { prefs.script.speed = Number(e.target.value); savePrefs(); };
   $('scriptSize').oninput = (e) => { prefs.script.size = Number(e.target.value); savePrefs(); applyScript(); };
-  $('prompter').onclick = () => { if (!prompterRAF) startPrompter(); else prompterPaused = !prompterPaused; };
+  $('prompter').onclick = () => { if (!prompterRAF) startPrompter(!(takeHere() && take.segs.length)); else prompterPaused = !prompterPaused; };
 
   $('settingsBtn').onclick = openSettings;
   $('queueBtn').onclick = () => (cfg.url ? openUploads() : openSettings());
@@ -1485,15 +1776,20 @@ function bind() {
   video.addEventListener('resize', () => updateCamInfo());
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-      if (recording) stopRecording();
+      // switching apps / locking the screen pauses the take; the segment so far is kept
+      if (countdownCancel) countdownCancel();
+      if (recording) pauseSegment();
+      unarmDelete();
       return;
     }
-    if (nav.view === 'camera' && !streamLive() && !recording) startCamera();
-    if (nav.view === 'camera') wake(true);
+    if (nav.view === 'camera' && !recording && !camReady()) startCamera(); // iOS ends or mutes the camera in the background
+    if (nav.view === 'camera') { wake(true); renderTakeUI(); }
     if (nav.brand && nav.view !== 'home') syncDay(nav.brand, nav.day);
     if (nav.day < ptDayKey() && nav.view === 'home') { nav.day = ptDayKey(); renderBrowser(); }
     uploader.run();
   });
+  window.addEventListener('pagehide', () => { if (recording) pauseSegment(); });
+  window.addEventListener('pageshow', (e) => { if (e.persisted && nav.view === 'camera' && !recording && !camReady()) startCamera(); });
   window.addEventListener('focus', () => { if (nav.brand && nav.view !== 'home' && nav.view !== 'camera') syncDay(nav.brand, nav.day); });
   window.addEventListener('online', () => uploader.run());
   window.addEventListener('hashchange', () => { consumeSetupHash(); refreshQueueUI(); });

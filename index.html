@@ -40,6 +40,7 @@
     </div>
     <span id="resBadge" class="badge2"></span>
   </div>
+  <div id="segBar" hidden></div>
   <div id="recTime" hidden>0:00</div>
 
   <nav id="rail">
@@ -56,8 +57,10 @@
 
   <footer id="bottom">
     <button id="folderBtn" class="side"><span id="folderBadge" class="badge" hidden>0</span><svg viewBox="0 0 24 24"><path d="M3.5 6.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg><span>Folder</span></button>
-    <button id="recBtn" aria-label="Record"><i></i></button>
+    <button id="segDel" class="side seg-btn" hidden aria-label="Delete the last part"><svg viewBox="0 0 24 24"><path d="M9 5h10.5a1.5 1.5 0 0 1 1.5 1.5v11a1.5 1.5 0 0 1-1.5 1.5H9l-6-7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M11.5 9.5l5 5M16.5 9.5l-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span id="segDelLabel">Delete</span></button>
+    <button id="recBtn" aria-label="Record / pause"><i></i></button>
     <label id="importBtn" class="side"><input type="file" id="importInput" accept="video/*" multiple hidden><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 16V9M8.8 12l3.2-3.2 3.2 3.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Upload</span></label>
+    <button id="segNext" class="side seg-btn" hidden aria-label="Finish the take"><b class="check"><svg viewBox="0 0 24 24"><path d="M5.5 12.5l4.2 4.2 8.8-9.4" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></b><span>Next</span><small id="segCount"></small></button>
   </footer>
 
   <!-- Quick panels -->

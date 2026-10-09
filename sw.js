@@ -1,7 +1,7 @@
 // Offline shell for Grok Film. Bump VERSION whenever app files change.
-const VERSION = 'grok-film-v0.2.0';
+const VERSION = 'grok-film-v0.3.0';
 const SHELL = [
-  './', './index.html', './styles.css', './app.js', './shared.js', './store.js', './uploader.js', './effects.js',
+  './', './index.html', './styles.css', './app.js', './shared.js', './store.js', './uploader.js', './effects.js', './segments.js', './mp4join.js',
   './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'
 ];
 const CDN_HOSTS = ['cdn.jsdelivr.net', 'storage.googleapis.com'];
